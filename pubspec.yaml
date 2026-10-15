@@ -1,0 +1,29 @@
+name: native_paywall
+description: Local semantic JSON paywall renderer with host-owned purchases.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.24.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  get: 4.7.3
+  crypto: ^3.0.6
+  cryptography: ^2.9.0
+  webview_flutter: ^4.9.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.paywallkit.native_paywall
+        pluginClass: PaywallResourcesPlugin
+      ios:
+        pluginClass: PaywallResourcesPlugin
+  assets:
+    - assets/paywall.schema.json
+    - assets/component-catalog.json
+    - assets/onboarding.json
