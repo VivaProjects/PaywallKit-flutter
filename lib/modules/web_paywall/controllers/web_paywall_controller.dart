@@ -1,3 +1,4 @@
+import '../../paywall_client/models/paywall_failure.dart';
 import 'dart:convert';
 import 'dart:async';
 import '../services/web_paywall_diagnostics.dart';
@@ -13,6 +14,10 @@ import '../services/web_paywall_resource_cache.dart';
 import '../models/web_paywall_environment.dart';
 import '../models/web_paywall_custom.dart';
 import '../models/web_paywall_session_identity.dart';
+import '../models/web_paywall_session_policy.dart';
+
+part 'web_paywall_actions.dart';
+part 'web_paywall_protocol.dart';
 
 /// WebView 只负责展示；价格、购买和恢复仍走宿主商店接口。
 class WebPaywallController extends GetxController {
@@ -22,12 +27,27 @@ class WebPaywallController extends GetxController {
       required this.environment,
       Map<String, dynamic> custom = const {},
       required this.bridge,
+      this.sessionPolicy,
+      this.onPurchaseResult,
+      this.onRestoreResult,
+      this.onFailure,
+      this.onRenderReady,
+      this.onResourceSource,
+      this.onActionFailure,
+      this.requiresRenderReady = false,
       required this.allowsDismiss,
       required this.dismiss,
       required this.openLegal,
       WebPaywallResourceCache? resourceCache})
       : resourceCache = resourceCache ?? WebPaywallResourceCache.shared,
-        custom = freezeWebPaywallCustom(custom);
+        custom = freezeWebPaywallCustom(custom) {
+    // 会话创建时校验，避免在预加载后才发现宿主传入非法环境。
+    environment.toPayload();
+    if (document.pageUri.scheme == 'http' &&
+        environment.runtimeEnvironment.name != 'test') {
+      throw const FormatException('HTTP paywalls require test environment');
+    }
+  }
 
   final WebPaywallResourceCache resourceCache;
   WebPaywallResourceLease? _resourceLease;
@@ -44,11 +64,30 @@ class WebPaywallController extends GetxController {
         environment: environment,
         customIdentity: customIdentity,
       );
-  String get customIdentity => webPaywallCustomIdentity(custom);
-  final PaywallPurchaseBridge bridge;
-  final bool allowsDismiss;
-  final void Function() dismiss;
-  final void Function(String) openLegal;
+  String get customIdentity => jsonEncode([
+        webPaywallCustomIdentity(custom),
+        sessionPolicy?.purchasableProductRefs,
+        sessionPolicy?.optionalProductRefs,
+        sessionPolicy?.custom,
+        sessionPolicy?.nextPlacement,
+        allowsDismiss,
+        requiresRenderReady
+      ]);
+  PaywallPurchaseBridge bridge;
+  final WebPaywallSessionPolicy? sessionPolicy;
+  void Function(String, PaywallPurchaseResult)? onPurchaseResult;
+  void Function(PaywallPurchaseResult)? onRestoreResult;
+  void Function(PaywallFailure)? onFailure;
+  void Function()? onRenderReady;
+  void Function(String)? onResourceSource;
+  void Function(String)? onActionFailure;
+  final bool requiresRenderReady;
+  final contentHeight = RxnDouble();
+  bool _attached = false;
+  bool _productsLoading = false;
+  bool allowsDismiss;
+  void Function() dismiss;
+  void Function(String) openLegal;
   final failed = false.obs;
   final ready = false.obs;
   late final WebViewController webView;
@@ -77,6 +116,7 @@ class WebPaywallController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _attached = true;
     trace("session.attach", "preloaded=$_started");
     if (_started) {
       _beginPresentationDeadline();
@@ -85,11 +125,64 @@ class WebPaywallController extends GetxController {
     }
   }
 
+  /// 高层预渲染正式挂载时开放动作，准备期间只允许握手与渲染回执。
+  void attachPresentation() {
+    if (!_active) return;
+    _attached = true;
+    _beginPresentationDeadline();
+  }
+
+  bool get awaitingProducts => _productsLoading;
+  bool get canRetain => isReusable && ready.value && !_busy;
+
+  /// 保留已渲染表面时关闭动作，不让未挂载的缓存页操作宿主。
+  void detachPresentation() {
+    _attached = false;
+    _readyTimer?.cancel();
+    _readyTimer = null;
+    onFailure = null;
+    onRenderReady = null;
+    onResourceSource = null;
+    onActionFailure = null;
+    onPurchaseResult = null;
+    onRestoreResult = null;
+    dismiss = () {};
+    openLegal = (_) {};
+  }
+
+  /// 价格资格缓存身份由宿主确认后才复用，并重新绑定本次业务回调。
+  void rebind(WebPaywallController fresh) {
+    bridge = fresh.bridge;
+    allowsDismiss = fresh.allowsDismiss;
+    dismiss = fresh.dismiss;
+    openLegal = fresh.openLegal;
+    onFailure = fresh.onFailure;
+    onRenderReady = fresh.onRenderReady;
+    onResourceSource = fresh.onResourceSource;
+    onActionFailure = fresh.onActionFailure;
+    onPurchaseResult = fresh.onPurchaseResult;
+    onRestoreResult = fresh.onRestoreResult;
+  }
+
   /// 由宿主在合适场景提前调用，页面未挂载时不计首屏超时。
   void preload() => _start(preloading: true);
 
   /// 预加载句柄只复用仍存活且未回退的会话。
   bool get isReusable => _active && _started && !failed.value;
+
+  /// 会话身份相同仍需验证宿主回调，防止预加载页关闭另一条路由。
+  bool canReuseFor(WebPaywallController other) =>
+      isReusable &&
+      sessionIdentity == other.sessionIdentity &&
+      identical(bridge, other.bridge) &&
+      identical(dismiss, other.dismiss) &&
+      identical(openLegal, other.openLegal) &&
+      identical(onPurchaseResult, other.onPurchaseResult) &&
+      identical(onRestoreResult, other.onRestoreResult) &&
+      identical(onFailure, other.onFailure) &&
+      identical(onRenderReady, other.onRenderReady) &&
+      identical(onResourceSource, other.onResourceSource) &&
+      identical(onActionFailure, other.onActionFailure);
 
   /// 未进入路由的预加载页可主动终止并释放引用。
   void destroyPreload() => _stop();
@@ -152,6 +245,11 @@ class WebPaywallController extends GetxController {
           document, environment.runtimeEnvironment.name);
     } catch (_) {
       trace("resource.fallback", "source=remote");
+      // 本地包失败不能转回远端下载，否则失去离线兜底语义。
+      if (document.localDirectory != null) {
+        _fail('resource');
+        return;
+      }
       // 没有清单的旧发布仍然可以通过远端页面加载。
     }
     if (!_active) {
@@ -159,6 +257,11 @@ class WebPaywallController extends GetxController {
       return;
     }
     trace("page.load", "source=${lease == null ? 'remote' : 'disk'}");
+    onResourceSource?.call(document.localDirectory != null
+        ? 'local'
+        : lease == null
+            ? 'remote'
+            : 'disk');
     _resourceLease = lease;
     _loadedPage = lease == null ? document.pageUri : Uri.file(lease.pagePath);
     if (lease == null) {
@@ -204,232 +307,22 @@ class WebPaywallController extends GetxController {
     trace("session.failed", "reason=$reason");
     _stop();
     failed.value = true;
+    final failure = reason.startsWith('products') ||
+            (reason == 'render_timeout' && _productsLoading)
+        ? PaywallFailure.productsUnavailable
+        : reason == 'render_timeout'
+            ? PaywallFailure.renderTimeout
+            : reason == 'resource' || reason.startsWith('navigation')
+                ? PaywallFailure.resource
+                : PaywallFailure.bridge;
+    onFailure?.call(failure);
   }
 
   /// 用户关闭后立刻阻断桥接，避免路由销毁之前继续投递消息。
   void close() {
-    if (!allowsDismiss || !_active) return;
+    if (!allowsDismiss || !_active || !_attached) return;
     _stop();
     dismiss();
-  }
-
-  /// 限制消息大小和指令集，且只执行目录中已解析的商品。
-  Future<void> _receive(String raw) async {
-    if (!_active || raw.length > 2048) return;
-    Object? decoded;
-    try {
-      decoded = jsonDecode(raw);
-    } catch (_) {
-      return;
-    }
-    if (decoded is! Map<String, dynamic>) return;
-    final type = decoded['type'];
-    if ([
-      'ready',
-      'productsRequest',
-      'bootstrapped',
-      'renderReady',
-      'renderFailed',
-      'purchase',
-      'restore',
-      'close',
-      'terms',
-      'privacy'
-    ].contains(type)) {
-      trace('bridge.received', 'type=$type');
-    }
-    await _handleEvent(type, decoded);
-  }
-
-  /// 已校验的桥消息按原有状态门禁执行，日志不改变动作权限。
-  Future<void> _handleEvent(Object? type, Map<String, dynamic> decoded) async {
-    switch (type) {
-      case 'ready':
-        if (_bridgeReady) return;
-        if (decoded['bridgeVersion'] != 2) {
-          _fail();
-          return;
-        }
-        _bridgeReady = true;
-        final capabilities = decoded['capabilities'];
-        _expectsRenderReady =
-            capabilities is List && capabilities.contains('renderReady');
-        _expectsProductRequest =
-            capabilities is List && capabilities.contains('productRequest');
-        await _sendSessionContext();
-      case 'productsRequest':
-        await _receiveProductRequest(decoded);
-      case 'bootstrapped':
-        if (!_acceptsReceipt(decoded)) return;
-        _bootstrapped = true;
-        if (!_expectsRenderReady) _finishRendering();
-      case 'renderReady':
-        if (_expectsRenderReady && _bootstrapped && _acceptsReceipt(decoded)) {
-          _finishRendering();
-        }
-      case 'renderFailed':
-        if (_acceptsReceipt(decoded) ||
-            (_bridgeReady && decoded['sessionID'] == _sessionID)) _fail();
-      case 'purchase':
-        await _purchase(decoded['productRef']);
-      case 'restore':
-        await _restore();
-      case 'close':
-        close();
-      case 'terms':
-        openLegal('terms');
-      case 'privacy':
-        openLegal('privacy');
-    }
-  }
-
-  /// 环境先发送给页面，旧页在 ready 后沿用发布清单。
-  Future<void> _sendSessionContext() async {
-    if (_expectsProductRequest) {
-      await _send({
-        'type': 'sessionContext',
-        'bridgeVersion': 2,
-        'sessionID': _sessionID,
-        'custom': {...custom, ...environment.toPayload()}
-      });
-    } else {
-      _requestedProductRefs = document.productRefs;
-      await _loadProducts();
-    }
-  }
-
-  /// 页面请求必须精确匹配当前会话、环境和清单，禁止重复查询。
-  Future<void> _receiveProductRequest(Map<String, dynamic> event) async {
-    if (!_active ||
-        !_bridgeReady ||
-        !_expectsProductRequest ||
-        _requestedProductRefs != null) return;
-    final refs = event['productRefs'];
-    // 查询前验证所有字段；不接受跨环境和清单之外的商品。
-    if (event['bridgeVersion'] != 2 ||
-        event['sessionID'] != _sessionID ||
-        event['runtimeEnvironment'] != environment.runtimeEnvironment.name ||
-        refs is! List ||
-        refs.isEmpty ||
-        refs.any((ref) => ref is! String) ||
-        refs.toSet().length != refs.length ||
-        refs.length > document.productRefs.length ||
-        !refs.every(document.productRefs.contains)) {
-      _fail('invalid_product_request');
-      return;
-    }
-    _requestedProductRefs = refs.cast<String>();
-    await _loadProducts();
-  }
-
-  /// 页面商品请求通过校验后查询商店，完成后只注入一次。
-  Future<void> _loadProducts() async {
-    trace("products.start", "requested=${_requestedProductRefs?.length ?? 0}");
-    try {
-      final values =
-          await bridge.products(_requestedProductRefs!, storefrontGroup);
-      if (!_active) return;
-      _products.clear();
-      for (final product in values) {
-        if (_requestedProductRefs!.contains(product.productRef)) {
-          _products[product.productRef] = product;
-        }
-      }
-      trace("products.loaded",
-          "matched=${_products.length} requested=${_requestedProductRefs?.length ?? 0}");
-      if (_products.isEmpty) {
-        _fail("products_empty");
-        return;
-      }
-      await _bootstrapIfPossible();
-    } catch (error) {
-      trace("products.failed", "error=${error.runtimeType}");
-      _fail("products_query");
-    }
-  }
-
-  /// 桥与商品同时就绪才注入，重复 ready 不会重复查询或重置交易状态。
-  Future<void> _bootstrapIfPossible() async {
-    if (!_active || !_bridgeReady || _products.isEmpty || _bootstrapSent) {
-      return;
-    }
-    _bootstrapSent = true;
-    final visible =
-        _requestedProductRefs!.where(_products.containsKey).map((ref) {
-      final product = _products[ref]!;
-      return {
-        'productRef': ref,
-        'displayPrice': product.displayPrice,
-        'disclosure': product.disclosure,
-        if (product.periodText != null) 'periodText': product.periodText,
-        if (product.dailyPriceText != null)
-          'dailyPriceText': product.dailyPriceText,
-        if (product.introductoryPriceText != null)
-          'introductoryPriceText': product.introductoryPriceText,
-        if (product.isEligibleForFreeTrial != null)
-          'isEligibleForFreeTrial': product.isEligibleForFreeTrial
-      };
-    }).toList();
-    await _send({
-      'type': 'bootstrap',
-      'bridgeVersion': 2,
-      'sessionID': _sessionID,
-      'custom': {...custom, ...environment.toPayload()},
-      'products': visible
-    });
-  }
-
-  /// 新页面必须返回本次会话标识，旧页面继续允许无标识回执。
-  bool _acceptsReceipt(Map<String, dynamic> event) {
-    if (!_active || !_bootstrapSent) return false;
-    if (event.containsKey('sessionID')) return event['sessionID'] == _sessionID;
-    return !_expectsRenderReady;
-  }
-
-  /// 收到适用协议的完成回执后才移除加载遮罩。
-  void _finishRendering() {
-    if (!_active || ready.value) return;
-    _readyTimer?.cancel();
-    trace("render.ready");
-    ready.value = true;
-  }
-
-  /// 只允许已展示且未处理交易的会话调用宿主购买。
-  Future<void> _purchase(Object? ref) async {
-    if (!_active ||
-        !ready.value ||
-        _busy ||
-        ref is! String ||
-        !_products.containsKey(ref)) return;
-    trace("action.start", "type=purchase");
-    _busy = true;
-    try {
-      final result = await bridge.purchase(_products[ref]!);
-      trace('action.result', 'type=purchase result=${result.name}');
-      await _send({'type': 'purchaseResult', 'result': result.name});
-    } catch (_) {
-      trace('action.result', 'type=purchase result=failed');
-      await _send({'type': 'purchaseResult', 'result': 'failed'});
-    } finally {
-      _busy = false;
-    }
-  }
-
-  /// 恢复与购买互斥，结果只投递给仍存活的会话。
-  Future<void> _restore() async {
-    if (!_active || !ready.value || _busy) return;
-    trace("action.start", "type=restore");
-    _busy = true;
-    try {
-      final result = await bridge.restore();
-      trace('action.result', 'type=restore result=${result.name}');
-      await _send({'type': 'restoreResult', 'result': result.name});
-    } catch (_) {
-      trace('action.result', 'type=restore result=failed');
-      await _send({'type': 'restoreResult', 'result': 'failed'});
-    } finally {
-      _busy = false;
-    }
   }
 
   /// 验证 JS 接收器已执行，避免可选调用静默丢弃初始化数据。

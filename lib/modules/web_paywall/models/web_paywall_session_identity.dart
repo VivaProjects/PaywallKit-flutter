@@ -14,6 +14,7 @@ String webPaywallSessionIdentity({
       document.documentId,
       document.revision,
       document.pageUri.toString(),
+      document.localDirectory?.path,
       document.catalogKey,
       document.productRefs,
       document.initialProductRef,

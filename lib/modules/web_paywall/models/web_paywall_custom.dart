@@ -2,6 +2,24 @@ import 'dart:convert';
 
 /// 冻结宿主传入的 JSON，避免预加载后外部修改影响会话内容。
 Map<String, dynamic> freezeWebPaywallCustom(Map<String, dynamic> value) {
+  // 禁止 custom 冒充商店报价、页面文案或标准环境，避免合并时静默覆盖。
+  const reserved = {
+    'products',
+    'price',
+    'displayPrice',
+    'disclosure',
+    'content',
+    'language',
+    'country',
+    'deviceModel',
+    'appVersion',
+    'runtimeEnvironment',
+    'placement'
+  };
+  if (value.keys.any(reserved.contains) ||
+      utf8.encode(jsonEncode(value)).length > 16384) {
+    throw const FormatException('Invalid custom fields or size');
+  }
   final frozen = _freezeValue(value);
   return frozen as Map<String, dynamic>;
 }

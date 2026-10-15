@@ -11,8 +11,7 @@ class WebPaywallPreloader {
   void preload() {
     // 每次重新读取宿主参数，防止复用已注入旧环境或 custom 的页面。
     final controller = createController();
-    if (_pending?.isReusable == true &&
-        _pending?.sessionIdentity == controller.sessionIdentity) {
+    if (_pending?.canReuseFor(controller) == true) {
       _pending?.trace('preload.reuse');
       return;
     }
@@ -28,8 +27,7 @@ class WebPaywallPreloader {
     final controller = _pending;
     _pending = null;
     // 展示时再比较一次，覆盖预加载后、路由打开前的参数变化。
-    if (controller?.isReusable == true &&
-        controller?.sessionIdentity == createController().sessionIdentity) {
+    if (controller?.canReuseFor(createController()) == true) {
       controller?.trace("preload.claim");
       return controller;
     }

@@ -32,10 +32,11 @@ class WebPaywallPackage {
       List<int> bytes, Map<String, dynamic> expected, String environment) {
     if (bytes.length > 256000) throw const FormatException('Package too large');
     final value = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-    final document = value['document'] as Map<String, dynamic>;
-    if (value['formatVersion'] != 1 ||
-        value['runtimeEnvironment'] != environment ||
-        value['entry'] != 'offline.html' ||
+    final document = {
+      ...documentForEnvironment(value, environment),
+      'pageUrl': expected['pageUrl']
+    };
+    if (value['entry'] != 'offline.html' ||
         document.length != expected.length ||
         expected.keys.any(
             (key) => jsonEncode(document[key]) != jsonEncode(expected[key]))) {
@@ -44,6 +45,53 @@ class WebPaywallPackage {
     return _validateFiles(
         (value['files'] as List).cast<Map<String, dynamic>>());
   }
+
+  /// 共享包只共享静态资源，每个环境必须拥有完整且独立的商品绑定。
+  static Map<String, dynamic> documentForEnvironment(
+      Map<String, dynamic> value, String environment) {
+    if (!['test', 'production'].contains(environment))
+      throw const FormatException('Invalid environment');
+    final document = Map<String, dynamic>.from(value['document'] as Map);
+    if (value['formatVersion'] == 1 &&
+        value['runtimeEnvironment'] == environment) return document;
+    final documents = value['documents'];
+    if (value['formatVersion'] != 2 ||
+        value['runtimeEnvironment'] != 'shared' ||
+        documents is! Map ||
+        documents.length != 2 ||
+        !documents.containsKey('test') ||
+        !documents.containsKey('production') ||
+        !_sameDocument(
+            document, Map<String, dynamic>.from(documents['test'] as Map))) {
+      throw const FormatException('Invalid shared package');
+    }
+    // 两套绑定必须对应同一页面和版本，不允许环境缺失后跨环境回退。
+    for (final entry in documents.values) {
+      final candidate = Map<String, dynamic>.from(entry as Map);
+      final refs = candidate['productRefs'];
+      if ([
+            'kind',
+            'bridgeVersion',
+            'documentId',
+            'revision',
+            'pageUrl',
+            'catalogKey'
+          ].any((key) => candidate[key] != document[key]) ||
+          refs is! List ||
+          refs.isEmpty ||
+          refs.any((ref) => ref is! String) ||
+          refs.toSet().length != refs.length ||
+          !refs.contains(candidate['initialProductRef'])) {
+        throw const FormatException('Invalid shared binding');
+      }
+    }
+    return Map<String, dynamic>.from(documents[environment] as Map);
+  }
+
+  /// 字典字段顺序不影响商品绑定身份。
+  static bool _sameDocument(Map<String, dynamic> a, Map<String, dynamic> b) =>
+      a.length == b.length &&
+      a.keys.every((key) => jsonEncode(a[key]) == jsonEncode(b[key]));
 
   /// 限制资源集大小并检查路径唯一性。
   static WebPaywallPackage _validateFiles(List<Map<String, dynamic>> files) {

@@ -1,5 +1,9 @@
 package com.paywallkit.native_paywall;
 
+import java.util.HashMap;
+import java.util.Locale;
+import android.os.Build;
+import android.content.pm.PackageManager;
 import java.io.File;
 import java.io.IOException;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -13,6 +17,22 @@ public final class PaywallResourcesPlugin implements FlutterPlugin {
     public void onAttachedToEngine(FlutterPluginBinding binding) {
         channel = new MethodChannel(binding.getBinaryMessenger(), "native_paywall/resources");
         channel.setMethodCallHandler((call, result) -> {
+            if (call.method.equals("environment")) {
+                HashMap<String, String> values = new HashMap<>();
+                values.put("language", Locale.getDefault().toLanguageTag());
+                values.put("deviceModel", Build.MODEL);
+                // 商店账户国家需由宿主 Billing 服务提供，不能用 Locale 国家冒充。
+                values.put("country", "");
+                try {
+                    String version = binding.getApplicationContext().getPackageManager()
+                        .getPackageInfo(binding.getApplicationContext().getPackageName(), 0).versionName;
+                    values.put("appVersion", version == null ? "" : version);
+                    result.success(values);
+                } catch (PackageManager.NameNotFoundException error) {
+                    result.error("environment", "Cannot read app version", null);
+                }
+                return;
+            }
             if (!call.method.equals("directory")) {
                 result.notImplemented();
                 return;

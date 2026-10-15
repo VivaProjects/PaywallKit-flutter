@@ -21,3 +21,40 @@ export 'modules/web_paywall/models/web_paywall_runtime_environment.dart';
 
 export 'modules/web_paywall/services/web_paywall_resource_cache.dart';
 export 'modules/web_paywall/models/web_paywall_resource_lease.dart';
+
+export 'modules/web_paywall/models/web_paywall_configuration.dart';
+export 'modules/web_paywall/models/web_paywall_session_policy.dart';
+export 'modules/web_paywall/services/web_paywall_package_loader.dart';
+export 'modules/paywall_client/models/paywall_configuration_request.dart';
+export 'modules/paywall_client/models/paywall_placement.dart';
+export 'modules/paywall_client/services/paywall_client.dart';
+export 'modules/paywall_client/services/paywall_configuration_source.dart';
+export 'modules/paywall_client/services/paywall_query_response.dart';
+export 'modules/paywall_client/bindings/paywall_session_binding.dart';
+
+export 'modules/paywall_client/controllers/paywall_flow_controller.dart';
+export 'modules/paywall_client/controllers/paywall_presentation_controller.dart';
+export 'modules/paywall_client/bindings/paywall_flow_binding.dart';
+export 'modules/paywall_client/bindings/paywall_presentation_binding.dart';
+export 'modules/paywall_client/models/paywall_failure.dart';
+export 'modules/paywall_client/models/paywall_session_input.dart';
+export 'modules/paywall_client/models/paywall_session_event.dart';
+export 'modules/paywall_client/models/paywall_query_configuration.dart';
+export 'modules/paywall_client/models/paywall_query_fallback.dart';
+export 'modules/paywall_client/services/paywall_storage.dart';
+export 'modules/paywall_client/services/paywall_package_archive.dart';
+export 'modules/paywall_client/services/paywall_local_package_store.dart';
+export 'modules/paywall_client/services/paywall_history_store.dart';
+export 'modules/paywall_client/services/paywall_query_attribution.dart';
+export 'modules/paywall_client/services/paywall_preload.dart';
+export 'modules/paywall_client/views/paywall_host.dart';
+export 'modules/paywall_client/views/paywall_flow_view.dart';
+export 'modules/paywall_client/views/paywall_preparation_view.dart';
+export 'modules/paywall_client/routes/paywall_presenter.dart';
+
+export 'modules/paywall_client/services/paywall_environment_provider.dart';
+
+export 'modules/paywall_client/models/paywall_request_parameters.dart';
+export 'modules/paywall_client/services/paywall_cached_preload.dart';
+
+export 'modules/paywall_client/services/paywall_storekit_product_mapper.dart';

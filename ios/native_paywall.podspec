@@ -1,9 +1,9 @@
 Pod::Spec.new do |s|
   s.name = 'native_paywall'
-  s.version = '0.1.0'
-  s.summary = 'Native paywall resource storage.'
-  s.description = 'Provides a private persistent directory excluded from backup.'
-  s.homepage = 'https://example.invalid/native-paywall'
+  s.version = '0.2.0'
+  s.summary = 'Paywall resources, StoreKit environment and product mapping.'
+  s.description = 'Provides private offline storage, storefront updates and optional StoreKit price mapping.'
+  s.homepage = 'https://github.com/VivaProjects/PaywallKit-flutter'
   s.license = { :type => 'Proprietary' }
   s.author = { 'PaywallKit' => 'support@example.invalid' }
   s.source = { :path => '.' }

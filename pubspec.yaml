@@ -1,7 +1,8 @@
 name: native_paywall
-description: Local semantic JSON paywall renderer with host-owned purchases.
-version: 0.1.0
+description: Native and H5 paywall SDK with host-owned purchases, offline fallback and managed sessions.
+version: 0.2.0
 publish_to: none
+repository: https://github.com/VivaProjects/PaywallKit-flutter
 environment:
   sdk: '>=3.5.0 <4.0.0'
   flutter: '>=3.24.0'

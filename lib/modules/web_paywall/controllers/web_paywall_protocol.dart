@@ -1,0 +1,217 @@
+part of 'web_paywall_controller.dart';
+
+/// 桥握手和渲染回执与交易动作分离。
+extension WebPaywallProtocol on WebPaywallController {
+  /// 限制消息大小和指令集，且只执行目录中已解析的商品。
+  Future<void> _receive(String raw) async {
+    if (!_active || raw.length > 2048) return;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (_) {
+      return;
+    }
+    if (decoded is! Map<String, dynamic>) return;
+    final type = decoded['type'];
+    if ([
+      'ready',
+      'productsRequest',
+      'bootstrapped',
+      'renderReady',
+      'renderFailed',
+      'purchase',
+      'restore',
+      'close',
+      'terms',
+      'privacy'
+    ].contains(type)) {
+      trace('bridge.received', 'type=$type');
+    }
+    await _handleEvent(type, decoded);
+  }
+
+  /// 已校验的桥消息按原有状态门禁执行，日志不改变动作权限。
+  Future<void> _handleEvent(Object? type, Map<String, dynamic> decoded) async {
+    switch (type) {
+      case 'ready':
+        if (_bridgeReady) return;
+        if (decoded['bridgeVersion'] != 2) {
+          _fail();
+          return;
+        }
+        _bridgeReady = true;
+        final capabilities = decoded['capabilities'];
+        _expectsRenderReady =
+            capabilities is List && capabilities.contains('renderReady');
+        if (requiresRenderReady && !_expectsRenderReady) {
+          _fail();
+          return;
+        }
+        _expectsProductRequest =
+            capabilities is List && capabilities.contains('productRequest');
+        await _sendSessionContext();
+      case 'productsRequest':
+        await _receiveProductRequest(decoded);
+      case 'bootstrapped':
+        if (!_acceptsReceipt(decoded)) return;
+        _bootstrapped = true;
+        if (!_expectsRenderReady) _finishRendering();
+      case 'renderReady':
+        if (_expectsRenderReady && _bootstrapped && _acceptsReceipt(decoded)) {
+          _finishRendering();
+        }
+      case 'renderFailed':
+        if (_acceptsReceipt(decoded) ||
+            (_bridgeReady && decoded['sessionID'] == _sessionID)) _fail();
+      case 'contentHeight':
+        final height = decoded['height'];
+        if (_acceptsReceipt(decoded) &&
+            decoded['sessionID'] == _sessionID &&
+            height is num &&
+            height.isFinite &&
+            height > 0 &&
+            height <= 100000) {
+          contentHeight.value = height.toDouble();
+        }
+      case 'purchase':
+        await _purchase(decoded['productRef']);
+      case 'restore':
+        await _restore();
+      case 'close':
+        close();
+      case 'terms':
+        if (_attached) openLegal('terms');
+      case 'privacy':
+        if (_attached) openLegal('privacy');
+    }
+  }
+
+  /// 环境先发送给页面，旧页在 ready 后沿用发布清单。
+  Future<void> _sendSessionContext() async {
+    if (_expectsProductRequest) {
+      await _send({
+        'type': 'sessionContext',
+        'bridgeVersion': 2,
+        'sessionID': _sessionID,
+        'custom': {
+          ...?sessionPolicy?.custom,
+          ...custom,
+          ...environment.toPayload()
+        }
+      });
+    } else {
+      _requestedProductRefs = document.productRefs;
+      await _loadProducts();
+    }
+  }
+
+  /// 页面请求必须精确匹配当前会话、环境和清单，禁止重复查询。
+  Future<void> _receiveProductRequest(Map<String, dynamic> event) async {
+    if (!_active ||
+        !_bridgeReady ||
+        !_expectsProductRequest ||
+        _requestedProductRefs != null) return;
+    final refs = event['productRefs'];
+    // 查询前验证所有字段；不接受跨环境和清单之外的商品。
+    if (event['bridgeVersion'] != 2 ||
+        event['sessionID'] != _sessionID ||
+        event['runtimeEnvironment'] != environment.runtimeEnvironment.name ||
+        refs is! List ||
+        refs.isEmpty ||
+        refs.any((ref) => ref is! String) ||
+        refs.toSet().length != refs.length ||
+        refs.length > document.productRefs.length ||
+        !refs.every(document.productRefs.contains)) {
+      _fail('invalid_product_request');
+      return;
+    }
+    _requestedProductRefs = refs.cast<String>();
+    await _loadProducts();
+  }
+
+  /// 页面商品请求通过校验后查询商店，完成后只注入一次。
+  Future<void> _loadProducts() async {
+    trace("products.start", "requested=${_requestedProductRefs?.length ?? 0}");
+    _productsLoading = true;
+    try {
+      final values =
+          await bridge.products(_requestedProductRefs!, storefrontGroup);
+      if (!_active) return;
+      _products.clear();
+      for (final product in values) {
+        if (_requestedProductRefs!.contains(product.productRef)) {
+          _products[product.productRef] = product;
+        }
+      }
+      trace("products.loaded",
+          "matched=${_products.length} requested=${_requestedProductRefs?.length ?? 0}");
+      // 显式策略要求所有非可选商品就绪；旧页面保留部分商品可展示行为。
+      final requiredRefs = sessionPolicy == null
+          ? <String>[]
+          : document.productRefs.where(
+              (ref) => !sessionPolicy!.optionalProductRefs.contains(ref));
+      if (_products.isEmpty ||
+          requiredRefs.any((ref) => !_products.containsKey(ref))) {
+        _fail("products_empty");
+        return;
+      }
+      await _bootstrapIfPossible();
+    } catch (error) {
+      trace("products.failed", "error=${error.runtimeType}");
+      _fail("products_query");
+    } finally {
+      _productsLoading = false;
+    }
+  }
+
+  /// 桥与商品同时就绪才注入，重复 ready 不会重复查询或重置交易状态。
+  Future<void> _bootstrapIfPossible() async {
+    if (!_active || !_bridgeReady || _products.isEmpty || _bootstrapSent) {
+      return;
+    }
+    _bootstrapSent = true;
+    final visible =
+        _requestedProductRefs!.where(_products.containsKey).map((ref) {
+      final product = _products[ref]!;
+      return {
+        'productRef': ref,
+        'displayPrice': product.displayPrice,
+        'disclosure': product.disclosure,
+        if (product.periodText != null) 'periodText': product.periodText,
+        if (product.dailyPriceText != null)
+          'dailyPriceText': product.dailyPriceText,
+        if (product.introductoryPriceText != null)
+          'introductoryPriceText': product.introductoryPriceText,
+        if (product.isEligibleForFreeTrial != null)
+          'isEligibleForFreeTrial': product.isEligibleForFreeTrial
+      };
+    }).toList();
+    await _send({
+      'type': 'bootstrap',
+      'bridgeVersion': 2,
+      'sessionID': _sessionID,
+      'custom': {
+        ...?sessionPolicy?.custom,
+        ...custom,
+        ...environment.toPayload()
+      },
+      'products': visible
+    });
+  }
+
+  /// 新页面必须返回本次会话标识，旧页面继续允许无标识回执。
+  bool _acceptsReceipt(Map<String, dynamic> event) {
+    if (!_active || !_bootstrapSent) return false;
+    if (event.containsKey('sessionID')) return event['sessionID'] == _sessionID;
+    return !_expectsRenderReady;
+  }
+
+  /// 收到适用协议的完成回执后才移除加载遮罩。
+  void _finishRendering() {
+    if (!_active || ready.value) return;
+    _readyTimer?.cancel();
+    trace("render.ready");
+    ready.value = true;
+    onRenderReady?.call();
+  }
+}

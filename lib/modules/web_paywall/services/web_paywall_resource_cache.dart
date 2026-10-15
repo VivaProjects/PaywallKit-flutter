@@ -13,11 +13,13 @@ class WebPaywallResourceCache {
   WebPaywallResourceCache(
       {Future<Directory> Function()? directory,
       this.download,
-      this.capacityBytes = 300 * 1024 * 1024})
+      this.capacityBytes = 300 * 1024 * 1024,
+      this.downloadTimeout = const Duration(seconds: 6)})
       : _directory = directory ?? _nativeDirectory;
   static final shared = WebPaywallResourceCache();
   final Future<Directory> Function() _directory;
   final int capacityBytes;
+  final Duration downloadTimeout;
   final Future<List<int>> Function(Uri, int, DateTime)? download;
   Future<Directory>? _root;
   final _pending = <String, Future<Directory>>{};
@@ -38,11 +40,16 @@ class WebPaywallResourceCache {
 
   /// 同版请求合并，租约覆盖等待下载到页面卸载的整个阶段。
   Future<WebPaywallResourceLease> prepare(
-      WebPaywallDocument document, String environment) async {
+      WebPaywallDocument document, String environment,
+      {Duration? timeout}) async {
     if (!['test', 'production'].contains(environment)) {
       throw const FormatException('Invalid environment');
     }
     final identity = WebPaywallPackage.identity(document);
+    if (document.localDirectory != null) {
+      await verifyDirectory(document.localDirectory!, document, environment);
+      return WebPaywallResourceLease(document.localDirectory!, () {});
+    }
     final key = sha256
         .convert(utf8.encode(jsonEncode([identity, environment])))
         .toString();
@@ -53,8 +60,10 @@ class WebPaywallResourceCache {
     Future<Directory>? pending;
     try {
       // 所有调用者共享一个 Future；清理不能删除等待挂载的包。
-      pending =
-          _pending.putIfAbsent(key, () => _resolve(key, identity, environment));
+      pending = _pending.putIfAbsent(
+          key,
+          () =>
+              _resolve(key, identity, environment, timeout ?? downloadTimeout));
       final directory = await pending;
       if (identical(_pending[key], pending)) _pending.remove(key);
       _leases[key] = (_leases[key] ?? 0) + 1;
@@ -70,6 +79,11 @@ class WebPaywallResourceCache {
       rethrow;
     }
   }
+
+  /// 本地包与历史包同样逐文件校验，不能因来自磁盘就跳过摘要检查。
+  Future<void> verifyDirectory(Directory directory, WebPaywallDocument document,
+          String environment) =>
+      _verify(directory, WebPaywallPackage.identity(document), environment);
 
   /// 手动清理仅影响空闲资源，活跃会话保持原版本。
   Future<void> clear() => _prune(0);
@@ -117,8 +131,8 @@ class WebPaywallResourceCache {
   }
 
   /// 命中时重新校验文件，损坏资源不允许继续展示。
-  Future<Directory> _resolve(
-      String key, Map<String, dynamic> identity, String environment) async {
+  Future<Directory> _resolve(String key, Map<String, dynamic> identity,
+      String environment, Duration timeout) async {
     final root = await _storageRoot();
     final directory = Directory('${root.path}/$key');
     try {
@@ -140,7 +154,7 @@ class WebPaywallResourceCache {
         environment, "resource.download_wait", "key=$key active=$_downloads");
     await _acquire();
     try {
-      return await _download(root, directory, identity, environment);
+      return await _download(root, directory, identity, environment, timeout);
     } finally {
       _finish();
     }
@@ -194,13 +208,17 @@ class WebPaywallResourceCache {
   }
 
   /// 临时目录校验完成后重命名，不会留下半更新页面。
-  Future<Directory> _download(Directory root, Directory destination,
-      Map<String, dynamic> identity, String environment) async {
+  Future<Directory> _download(
+      Directory root,
+      Directory destination,
+      Map<String, dynamic> identity,
+      String environment,
+      Duration timeout) async {
     WebPaywallDiagnostics.log(environment, 'resource.download_start',
         'key=${destination.path.split('/').last}');
     final temporary = await root.createTemp('tmp-');
     final base = Uri.parse(identity['pageUrl'] as String).resolve('.');
-    final deadline = DateTime.now().add(const Duration(seconds: 6));
+    final deadline = DateTime.now().add(timeout);
     try {
       final bytes =
           await _fetch(base.resolve('package.json'), 256000, deadline);

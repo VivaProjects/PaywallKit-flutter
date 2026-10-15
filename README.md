@@ -12,17 +12,17 @@ dependencies:
     path: ../flutter
 ```
 
-发布到独立 Git 仓库后：
+通过独立 Git 仓库接入：
 
 ```yaml
 dependencies:
   native_paywall:
     git:
-      url: <FLUTTER_SDK_GIT_URL>
-      ref: 0.1.0
+      url: git@github.com:VivaProjects/PaywallKit-flutter.git
+      ref: 0.2.0
 ```
 
-包已经位于仓库根目录，无需 Git `path` 字段。替换真实 URL，并使用实际已发布标签。当前配置保留 `publish_to: none`，支持 Git 发布与接入，不代表已具备 pub.dev 公共发布条件。
+包已经位于仓库根目录，无需 Git `path` 字段。使用版本标签固定依赖。当前配置保留 `publish_to: none`，支持 Git 发布与接入，不代表已具备 pub.dev 公共发布条件。
 
 ## 检查与发布
 
@@ -43,3 +43,7 @@ dart run tool/check_contract.dart
 - [协议契约](docs/PROTOCOL.md)
 
 协议和回退资源均为本仓库快照。改桥接时检查其他实现兼容性，但不强制各仓库版本号相同。
+
+Flutter 高层配置查询、点位解析与会话接入见 [Flutter Client](docs/FLUTTER_CLIENT.md)。
+
+完整高层能力和回归证据见 [iOS 能力对照](docs/IOS_PARITY.md)。
