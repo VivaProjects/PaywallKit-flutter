@@ -1,16 +1,45 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import '../controllers/paywall_runtime_controller.dart';
 import '../widgets/paywall_node_widget.dart';
 import '../widgets/paywall_purchase_bar.dart';
 
-class PaywallRendererView extends GetView<PaywallRuntimeController> {
+class PaywallRendererView extends StatefulWidget {
   const PaywallRendererView(
-      {super.key, required this.sessionTag, required this.assetBuilder});
-  final String sessionTag;
+      {super.key,
+      required this.controller,
+      this.disposeController = true,
+      required this.assetBuilder});
+  final PaywallRuntimeController controller;
   final Widget? Function(String) assetBuilder;
+
+  /// 默认随视图释放；外部持有者可关闭自动释放并在卸载后自行 dispose。
+  final bool disposeController;
   @override
-  String? get tag => sessionTag;
+  State<PaywallRendererView> createState() => _PaywallRendererViewState();
+}
+
+class _PaywallRendererViewState extends State<PaywallRendererView> {
+  PaywallRuntimeController get controller => widget.controller;
+  @override
+  void initState() {
+    super.initState();
+    controller.start();
+  }
+
+  /// 更换会话时终止旧实例并初始化新实例，禁止跨会话复用状态。
+  @override
+  void didUpdateWidget(covariant PaywallRendererView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, controller)) return;
+    if (oldWidget.disposeController) oldWidget.controller.dispose();
+    controller.start();
+  }
+
+  @override
+  void dispose() {
+    if (widget.disposeController) controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +82,7 @@ class PaywallRendererView extends GetView<PaywallRuntimeController> {
                   key: ValueKey(node.nodeId),
                   node: node,
                   controller: controller,
-                  assetBuilder: assetBuilder)),
+                  assetBuilder: widget.assetBuilder)),
       ]),
     ));
   }

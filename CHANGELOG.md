@@ -1,5 +1,15 @@
 # Flutter SDK 变更记录
 
+## [1.0.0] - 2026-10-16
+
+- 不兼容 API 变更：移除 GetX 依赖与全部 Binding API，改为显式控制器注入、ValueNotifier 和宿主指定 Navigator。
+- 保留配置、归因、离线与历史回退、预加载和缓存复用、四种展示模式、交易桥与关闭后接续。
+- 视图默认管理控制器 start/dispose，新增 PaywallSessionFactory，补充无框架接入与迁移文档。
+- 增加 SDK 框架独立性规则与依赖回归检查，防止重新引入 GetX 或同类宿主框架。
+- 增加 presentationOverride、showBackButton、onPresented 与 isPresented，支持宿主固定展示方式、原生返回入口和隐藏准备。
+- 购买或恢复处理中拒绝普通关闭，避免交易结果因页面提前释放而丢失。
+- 临时隐藏保留会话回调并暂停回退页动作；宿主展示观察回调异常不再中断路由回收。
+
 ## [0.2.0] - 2026-10-15
 
 - 同步 iOS 高层 SDK 能力：归因、离线更新、成功版本回退、预渲染、缓存、展示及会话生命周期。

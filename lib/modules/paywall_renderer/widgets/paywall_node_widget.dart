@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import '../controllers/paywall_runtime_controller.dart';
 import '../models/paywall_node.dart';
 import 'paywall_product_picker.dart';
@@ -84,10 +83,12 @@ class PaywallNodeWidget extends StatelessWidget {
 
   Widget _legal() =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Obx(() => TextButton(
-            onPressed:
-                controller.isPurchasing.value ? null : controller.restore,
-            child: Text(controller.copy.restore))),
+        ListenableBuilder(
+            listenable: Listenable.merge([controller.isPurchasing]),
+            builder: (context, child) => TextButton(
+                onPressed:
+                    controller.isPurchasing.value ? null : controller.restore,
+                child: Text(controller.copy.restore))),
         TextButton(
             onPressed: () => controller.openLegal(PaywallLegalRoute.privacy),
             child: Text(controller.copy.privacy)),
@@ -100,10 +101,12 @@ class PaywallNodeWidget extends StatelessWidget {
     if (!controller.allowsDismiss) return const SizedBox.shrink();
     return Align(
         alignment: AlignmentDirectional.centerEnd,
-        child: Obx(() => IconButton(
-            tooltip: controller.snapshot.text(node.labelKey),
-            onPressed:
-                controller.isPurchasing.value ? null : controller.dismiss,
-            icon: const Icon(Icons.close))));
+        child: ListenableBuilder(
+            listenable: Listenable.merge([controller.isPurchasing]),
+            builder: (context, child) => IconButton(
+                tooltip: controller.snapshot.text(node.labelKey),
+                onPressed:
+                    controller.isPurchasing.value ? null : controller.dismiss,
+                icon: const Icon(Icons.close))));
   }
 }

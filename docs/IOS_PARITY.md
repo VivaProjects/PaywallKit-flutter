@@ -1,6 +1,6 @@
 # iOS / Flutter SDK 能力对照
 
-以本次工作区的 iOS SDK 源码为参照，Flutter 使用平台等价实现，不依赖或链接 iOS SDK 仓库。SwiftUI View 对应 GetX Controller / Binding / Widget，Apple 专有商店能力由 Flutter 的 iOS 插件提供。
+以本次工作区的 iOS SDK 源码为参照，Flutter 使用平台等价实现，不依赖或链接 iOS SDK 仓库。SwiftUI View 对应普通 Dart 控制器与 Flutter Widget，Apple 专有商店能力由 Flutter 的 iOS 插件提供。
 
 | iOS 能力 | Flutter 实现 | 验证 |
 | --- | --- | --- |
@@ -15,7 +15,7 @@
 | 当前/历史/更新/内置单向回退、总期限、重试 | PaywallFallbackContext、PaywallFlowController | 完整四段回退、取消晚到结果测试 |
 | 隐藏预渲染、首屏回执、一次性消费 | PaywallPreload、PaywallPreparationView | 未显示不能购买、身份匹配及单次消费测试 |
 | 常驻预热和展示后缓存、价格资格身份 | PaywallCachedPreload、Client retainedPlacements | 展示后复用/身份变更重建测试 |
-| 全屏/半屏/锁定半屏/Push | PaywallPresenter、PaywallFlowView、PaywallSheetView | GetX Widget 路由、锁定与接续测试 |
+| 全屏/半屏/锁定半屏/Push | PaywallPresenter、PaywallFlowView、PaywallSheetView | MaterialApp / Navigator 路由、锁定与接续测试 |
 | 内容高度回执、稳定视口、宽度变化重新布局 | WebPaywallController.contentHeight、PaywallSheetController | 200ms 定高、冻结、宽度变化测试 |
 | 真实退场完成、预渲染取消、后续点位 | PaywallPresentationController、PaywallHost、PaywallPresenter | 不提前创建第二墙的路由测试 |
 | ready/resolved/关闭/重试/交易/错误事件 | PaywallSessionEvent | 桥接与完整会话测试 |
@@ -23,3 +23,5 @@
 | 原有语义 JSON 渲染、签名、配置缓存 | 原有 paywall_renderer 模块保留 | contract、签名互操作及回归测试 |
 
 价格、商店权益、恢复与验单始终由宿主交易桥确认。Android 不复制 Apple 的账户管理行为；原生接口与 Widget 测试通过不代表已完成真机购买验收。
+
+移除 GetX 后，完整回归使用普通 MaterialApp；额外覆盖嵌套 Navigator、覆盖路由保留、宿主卸载取消、隐藏准备失败、低层 WebView 与原生渲染器生命周期，并检查 SDK 依赖树不含宿主框架。

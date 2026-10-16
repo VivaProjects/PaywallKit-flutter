@@ -1,12 +1,12 @@
 import 'dart:async';
-import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 import '../controllers/paywall_flow_controller.dart';
 import 'paywall_preload.dart';
 
 /// 常驻入口后台预热完成后交给 Client 缓存，正式展示重建业务回调。
 class PaywallCachedPreload {
   final preload = PaywallPreload();
-  Worker? _ready;
+  VoidCallback? _ready;
   int _generation = 0;
   PaywallFlowController? _flow;
 
@@ -14,12 +14,17 @@ class PaywallCachedPreload {
   void start(PaywallFlowController flow) {
     cancel();
     _flow = flow;
-    if (!flow.client.retainedPlacements.contains(flow.placement)) return;
+    if (!flow.client.retainedPlacements.contains(flow.placement)) {
+      flow.dispose();
+      _flow = null;
+      return;
+    }
     flow.client.invalidatePage(flow.placement);
     final generation = ++_generation;
-    _ready = ever(flow.ready, (ready) {
-      if (ready) unawaited(_park(flow, generation));
-    });
+    _ready = () {
+      if (flow.ready.value) unawaited(_park(flow, generation));
+    };
+    flow.ready.addListener(_ready!);
     preload.start(flow, cacheIdentity: flow.cacheIdentity);
   }
 
@@ -27,15 +32,21 @@ class PaywallCachedPreload {
   Future<void> _park(PaywallFlowController flow, int generation) async {
     await flow.parkInCache(() => generation == _generation);
     if (generation != _generation) return;
-    _ready?.dispose();
+    if (_ready != null) _flow?.ready.removeListener(_ready!);
     _ready = null;
     preload.cancel();
+  }
+
+  /// 宿主卸载隐藏视图后终止预热并释放监听。
+  void dispose() {
+    cancel();
+    preload.dispose();
   }
 
   /// 权益身份改变或禁用预热时同步移除旧 Client 缓存。
   void cancel() {
     _generation++;
-    _ready?.dispose();
+    if (_ready != null) _flow?.ready.removeListener(_ready!);
     _ready = null;
     preload.cancel();
     final flow = _flow;

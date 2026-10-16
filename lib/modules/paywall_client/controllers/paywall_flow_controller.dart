@@ -1,7 +1,7 @@
 import '../../paywall_renderer/models/paywall_runtime_copy.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 import '../../paywall_renderer/services/paywall_purchase_bridge.dart';
 import '../../web_paywall/controllers/web_paywall_controller.dart';
 import '../../web_paywall/models/web_paywall_document.dart';
@@ -14,8 +14,8 @@ import '../models/paywall_session_event.dart';
 import '../services/paywall_client.dart';
 import '../services/paywall_fallback_context.dart';
 
-/// 页面级状态机统一准备、回退、重试和交易生命周期，由路由 Binding 持有。
-class PaywallFlowController extends GetxController {
+/// 页面级状态机统一准备、回退、重试和交易生命周期，由展示路由显式持有。
+class PaywallFlowController {
   PaywallFlowController(
       {required this.client,
       required this.placement,
@@ -24,8 +24,10 @@ class PaywallFlowController extends GetxController {
       this.onEvent,
       this.resourceCache,
       this.cacheIdentity = 0,
+      this.presentationOverride,
       this.copy = const PaywallRuntimeCopy(),
       this.timeout = const Duration(seconds: 12)}) {
+    presentation = presentationOverride ?? WebPaywallPresentation.fullScreen;
     fallback = PaywallFallbackContext(
         client: client, placement: placement, timeout: timeout);
   }
@@ -37,13 +39,16 @@ class PaywallFlowController extends GetxController {
   final WebPaywallResourceCache? resourceCache;
   final Duration timeout;
   final Object cacheIdentity;
+
+  /// 宿主入口可固定展示方式，配置、离线回退和重试均不能覆盖。
+  final WebPaywallPresentation? presentationOverride;
   final PaywallRuntimeCopy copy;
   bool _retainedWeb = false;
   late final PaywallFallbackContext fallback;
-  final web = Rxn<WebPaywallController>();
-  final failure = Rxn<PaywallFailure>();
-  final ready = false.obs;
-  final preparing = false.obs;
+  final web = ValueNotifier<WebPaywallController?>(null);
+  final failure = ValueNotifier<PaywallFailure?>(null);
+  final ready = ValueNotifier(false);
+  final preparing = ValueNotifier(false);
   PaywallPlacement? selected;
   WebPaywallPresentation presentation = WebPaywallPresentation.fullScreen;
   void Function(PaywallSessionEventType)? onExit;
@@ -56,14 +61,14 @@ class PaywallFlowController extends GetxController {
       _closing = false;
   bool get isUsable => _active && !_closing && failure.value == null;
   bool get allowsDismiss =>
-      web.value?.allowsDismiss ??
-      presentation != WebPaywallPresentation.halfSheetLocked;
+      web.value?.isProcessing != true &&
+      (web.value?.allowsDismiss ??
+          presentation != WebPaywallPresentation.halfSheetLocked);
   String? get nextPlacement => selected?.sessionPolicy?.nextPlacement;
 
   /// 普通进入开始准备，已预渲染页面直接接管，不重复查询商品。
-  @override
-  void onInit() {
-    super.onInit();
+  void start() {
+    if (!_active || _closing) return;
     attach();
     if (!_started) unawaited(load());
   }
@@ -81,6 +86,12 @@ class PaywallFlowController extends GetxController {
     web.value?.attachPresentation();
   }
 
+  /// 隐藏视图同时暂停当前网页与后续回退网页的动作权限。
+  void detach() {
+    _attached = false;
+    web.value?.pausePresentation();
+  }
+
   /// 配置和资格准备共用本次截止时间，晚到结果不重建会话。
   Future<void> load() async {
     if (!_active || _closing) return;
@@ -92,7 +103,9 @@ class PaywallFlowController extends GetxController {
       final choice = fallback.selected ??
           await fallback.resolve().timeout(fallback.remaining);
       if (!_current(token)) return;
-      if (selected == null) presentation = choice.presentation;
+      if (selected == null) {
+        presentation = presentationOverride ?? choice.presentation;
+      }
       await _activate(choice, token);
     } catch (error) {
       if (_current(token))
@@ -333,10 +346,16 @@ class PaywallFlowController extends GetxController {
     web.value = null;
   }
 
-  /// GetX 路由结束时销毁本次会话，不取消宿主已发出的商店交易。
-  @override
-  void onClose() {
+  bool _disposed = false;
+
+  /// 路由卸载后释放监听状态，已交给 Client 的缓存网页继续存活。
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     cancel();
-    super.onClose();
+    web.dispose();
+    failure.dispose();
+    ready.dispose();
+    preparing.dispose();
   }
 }

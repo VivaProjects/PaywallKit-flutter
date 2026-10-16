@@ -1,6 +1,6 @@
 # native_paywall Flutter SDK
 
-独立 Flutter SDK 仓库。根目录即 Flutter package，包含 Dart/GetX 实现、Android/iOS 原生插件、资源、测试和协议快照；不依赖 iOS PaywallKit 或 H5 管理项目。
+独立 Flutter SDK 仓库。根目录即 Flutter package，包含 Dart/Flutter 实现、Android/iOS 原生插件、资源、测试和协议快照；不依赖 iOS PaywallKit 或 H5 管理项目。
 
 ## 接入
 
@@ -19,7 +19,7 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 0.2.0
+      ref: 1.0.0
 ```
 
 包已经位于仓库根目录，无需 Git `path` 字段。使用版本标签固定依赖。当前配置保留 `publish_to: none`，支持 Git 发布与接入，不代表已具备 pub.dev 公共发布条件。
@@ -47,3 +47,5 @@ dart run tool/check_contract.dart
 Flutter 高层配置查询、点位解析与会话接入见 [Flutter Client](docs/FLUTTER_CLIENT.md)。
 
 完整高层能力和回归证据见 [iOS 能力对照](docs/IOS_PARITY.md)。
+
+SDK 不依赖宿主状态管理、路由或依赖注入框架，可在普通 MaterialApp 中使用。1.0.0 的无 GetX API 与 0.2.0 不兼容，升级说明见 [框架独立性与迁移](docs/FRAMEWORK_INDEPENDENCE.md)。

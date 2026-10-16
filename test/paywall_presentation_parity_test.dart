@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:get/get.dart';
 import 'package:native_paywall/native_paywall.dart';
 import 'package:native_paywall/modules/web_paywall/models/web_paywall_package.dart';
 import 'package:native_paywall/modules/paywall_client/controllers/paywall_sheet_controller.dart';
@@ -35,7 +34,6 @@ void main() {
   testWidgets(
       'ready gate mounts one surface and cancellation prevents late presentation',
       (tester) async {
-    Get.testMode = true;
     final platform = FakeWebViewPlatform();
     WebViewPlatform.instance = platform;
     final doc = fixtures.document('page');
@@ -57,7 +55,8 @@ void main() {
                   'paywalls': {'page': WebPaywallPackage.identity(doc)}
                 })));
     final coordinator = PaywallPresentationController();
-    final presenter = PaywallPresenter(controller: coordinator);
+    final navigatorKey = GlobalKey<NavigatorState>();
+    late PaywallPresenter presenter;
     final flows = <PaywallFlowController>[];
     final bridge = FlowBridge();
     PaywallFlowController create(String placement) {
@@ -73,10 +72,13 @@ void main() {
       return flow;
     }
 
-    await tester.pumpWidget(GetMaterialApp(
+    await tester.pumpWidget(MaterialApp(
+        navigatorKey: navigatorKey,
         home: Scaffold(
             body: PaywallHost(
                 controller: coordinator, child: const SizedBox.expand()))));
+    presenter = PaywallPresenter(
+        controller: coordinator, navigator: navigatorKey.currentState!);
     final first = presenter.present(
         placement: 'first', create: create, waitsForReady: true);
     for (var i = 0; i < 4; i++) {
@@ -114,15 +116,13 @@ void main() {
     expect(coordinator.committed, isFalse);
     await tester.pumpWidget(const SizedBox());
     client.dispose();
-    coordinator.onClose();
-    Get.reset();
+    coordinator.dispose();
   });
 
   for (final mode in ['fullScreen', 'halfSheet', 'halfSheetLocked', 'push']) {
     testWidgets(
         '$mode route closes exactly once and next placement waits for completed transition',
         (tester) async {
-      Get.testMode = true;
       final platform = FakeWebViewPlatform();
       WebViewPlatform.instance = platform;
       final doc = fixtures.document('page');
@@ -154,7 +154,8 @@ void main() {
                     }
                   })));
       final presentation = PaywallPresentationController();
-      final presenter = PaywallPresenter(controller: presentation);
+      final navigatorKey = GlobalKey<NavigatorState>();
+      late PaywallPresenter presenter;
       final created = <PaywallFlowController>[];
       final bridge = FlowBridge();
       PaywallFlowController create(String placement) {
@@ -171,7 +172,8 @@ void main() {
       }
 
       Future<PaywallSessionEventType?>? showing;
-      await tester.pumpWidget(GetMaterialApp(
+      await tester.pumpWidget(MaterialApp(
+          navigatorKey: navigatorKey,
           home: Scaffold(
               body: PaywallHost(
                   controller: presentation,
@@ -182,6 +184,8 @@ void main() {
                                 placement: 'first', create: create);
                           },
                           child: const Text('Open')))))));
+      presenter = PaywallPresenter(
+          controller: presentation, navigator: navigatorKey.currentState!);
       await tester.tap(find.text('Open'));
       for (var i = 0; i < 10; i++) {
         await tester.pump(const Duration(milliseconds: 50));
@@ -210,8 +214,7 @@ void main() {
       expect(presentation.active, isFalse);
       await tester.pumpWidget(const SizedBox());
       client.dispose();
-      presentation.onClose();
-      Get.reset();
+      presentation.dispose();
     });
   }
 }

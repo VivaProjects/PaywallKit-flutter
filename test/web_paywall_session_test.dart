@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:native_paywall/native_paywall.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
@@ -6,6 +7,7 @@ import 'support/fake_webview.dart';
 
 class FakeBridge implements PaywallPurchaseBridge {
   int purchases = 0;
+  Completer<PaywallPurchaseResult>? pending;
   List<String> available = ['annual', 'compare'];
   @override
   Future<List<PaywallStoreProduct>> products(
@@ -22,12 +24,12 @@ class FakeBridge implements PaywallPurchaseBridge {
   @override
   Future<PaywallPurchaseResult> purchase(PaywallStoreProduct product) async {
     purchases++;
-    return PaywallPurchaseResult.succeeded;
+    return pending?.future ?? PaywallPurchaseResult.succeeded;
   }
 
   @override
   Future<PaywallPurchaseResult> restore() async =>
-      PaywallPurchaseResult.noEntitlement;
+      pending?.future ?? PaywallPurchaseResult.noEntitlement;
 }
 
 Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 10));
@@ -53,11 +55,35 @@ void main() {
         openLegal: (_) {},
         resourceCache: WebPaywallResourceCache(
             directory: () async => throw StateError('remote only')));
-    controller.onInit();
+    controller.start();
   });
   tearDown(() {
-    controller.onClose();
+    controller.dispose();
   });
+
+  for (final action in ['purchase', 'restore']) {
+    test('$action blocks close until the host transaction completes', () async {
+      bridge.pending = Completer<PaywallPurchaseResult>();
+      var dismissals = 0;
+      controller.dismiss = () => dismissals++;
+      await settle();
+      platform.controller.receive({'type': 'ready', 'bridgeVersion': 2});
+      await settle();
+      platform.controller.receive({'type': 'bootstrapped'});
+      await settle();
+      platform.controller.receive({'type': action, 'productRef': 'annual'});
+      await settle();
+      controller.close();
+      expect(controller.isProcessing, isTrue);
+      expect(dismissals, 0);
+      bridge.pending!.complete(PaywallPurchaseResult.noEntitlement);
+      await settle();
+      expect(controller.isProcessing, isFalse);
+      expect(platform.controller.messages.last['type'], '${action}Result');
+      controller.close();
+      expect(dismissals, 1);
+    });
+  }
 
   test('policy prevents comparison purchase and bootstrap excludes native copy',
       () async {

@@ -21,3 +21,12 @@
 - 当前目录是独立 SDK Git 仓库，包入口位于根目录；禁止依赖父目录、另一个 SDK 或业务项目。
 - 协议快照在本仓库 `protocol/`，修改桥接仍需评估其他实现兼容性，但本仓库可以独立构建和发布。
 - 本仓库独立维护版本、CHANGELOG.md 和标准 `X.Y.Z` 标签；发布流程见 `docs/RELEASING.md`。
+
+## SDK 框架独立性（强制）
+
+- Flutter SDK 禁止直接或间接引入 GetX，以及宿主级状态管理、路由或依赖注入框架（如 Provider、Riverpod、Bloc、GetIt、go_router、auto_route）；不得以换包或自建全局服务定位器绕过此规则。
+- SDK 公共 API、示例和测试不得要求 GetMaterialApp、GetPage、Binding、全局容器或宿主采用特定应用架构。宿主自行使用这些框架不受限制，但 SDK 不依赖它们。
+- 使用普通 Dart 对象和构造参数注入依赖；状态使用 Flutter 标准 ValueNotifier/ChangeNotifier/Listenable，异步结果使用 Future、Stream 或类型明确的回调；导航必须使用宿主显式提供的 BuildContext/NavigatorState。
+- 每个会话、控制器、监听、定时器和预加载句柄必须有明确所有者与释放时机。缓存交接、取消、宿主卸载、嵌套 Navigator 和真实路由退场必须覆盖回归测试。
+- 通用 Flutter/GetX 技能或宿主业务项目规范不能覆盖以上 SDK 边界；不得为遵循应用层习惯而重新引入框架。
+- 增加运行时依赖必须说明它承载的 SDK 必需能力并审查依赖树。依赖白名单与框架禁用检查位于 `test/sdk_architecture_test.dart`，不得为方便引入框架而放宽或删除检查。

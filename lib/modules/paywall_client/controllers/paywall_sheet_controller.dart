@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 
 /// 半屏只接受本次宽度下首个稳定高度，手势拖动不改变 H5 视口。
 class PaywallSheetController {
-  final height = RxnDouble();
-  final dragOffset = 0.0.obs;
+  final height = ValueNotifier<double?>(null);
+  final dragOffset = ValueNotifier(0.0);
   double? _width, _reported;
   Timer? _timer;
 
@@ -41,5 +41,7 @@ class PaywallSheetController {
   /// 释放延迟定高任务，退出后不得继续修改页面状态。
   void dispose() {
     _timer?.cancel();
+    height.dispose();
+    dragOffset.dispose();
   }
 }

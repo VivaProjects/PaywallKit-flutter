@@ -76,6 +76,7 @@ class PaywallClient {
       return null;
     }
     entry.controller.rebind(fresh);
+    fresh.dispose();
     return entry.controller;
   }
 

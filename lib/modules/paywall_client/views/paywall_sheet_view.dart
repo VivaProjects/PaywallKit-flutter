@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import '../controllers/paywall_flow_controller.dart';
 import '../controllers/paywall_sheet_controller.dart';
 import '../../web_paywall/models/web_paywall_configuration.dart';
@@ -16,7 +15,7 @@ class PaywallSheetView extends StatefulWidget {
 
 class _PaywallSheetViewState extends State<PaywallSheetView> {
   late final PaywallSheetController layout;
-  Worker? _webWorker, _heightWorker;
+  ValueNotifier<double?>? _contentHeight;
   bool get locked =>
       widget.controller.presentation ==
           WebPaywallPresentation.halfSheetLocked ||
@@ -28,19 +27,33 @@ class _PaywallSheetViewState extends State<PaywallSheetView> {
     super.initState();
     layout = PaywallSheetController();
     _bindHeight();
-    _webWorker = ever(widget.controller.web, (_) => _bindHeight());
+    widget.controller.web.addListener(_bindHeight);
   }
 
   /// 回退更换 WebView 时丢弃旧高度监听，新的页面独立定高。
   void _bindHeight() {
-    _heightWorker?.dispose();
+    _contentHeight?.removeListener(_reportHeight);
     layout.height.value = null;
     final web = widget.controller.web.value;
+    _contentHeight = web?.contentHeight;
     if (web == null) return;
     layout.seed(web.contentHeight.value);
-    _heightWorker = ever(web.contentHeight, (value) {
-      if (value != null) layout.report(value);
-    });
+    _contentHeight!.addListener(_reportHeight);
+  }
+
+  /// 只采纳当前网页的高度，旧网页监听在切换时移除。
+  void _reportHeight() {
+    final value = _contentHeight?.value;
+    if (value != null) layout.report(value);
+  }
+
+  @override
+  void didUpdateWidget(covariant PaywallSheetView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, widget.controller)) return;
+    oldWidget.controller.web.removeListener(_bindHeight);
+    widget.controller.web.addListener(_bindHeight);
+    _bindHeight();
   }
 
   @override
@@ -60,58 +73,62 @@ class _PaywallSheetViewState extends State<PaywallSheetView> {
                   child: const ColoredBox(color: Colors.black54))),
           Align(
               alignment: Alignment.bottomCenter,
-              child: Obx(() => Transform.translate(
-                  offset: Offset(0, layout.dragOffset.value),
-                  child: SizedBox(
-                      height: (layout.height.value == null
-                              ? available
-                              : layout.height.value! +
-                                  (locked ? 0 : 24) +
-                                  MediaQuery.paddingOf(context).bottom)
-                          .clamp(1.0, available),
-                      width: constraints.maxWidth,
-                      child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(20)),
-                          child: Column(children: [
-                            if (!locked)
-                              GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onVerticalDragUpdate: (event) => layout
-                                          .dragOffset.value =
-                                      (layout.dragOffset.value + event.delta.dy)
+              child: ListenableBuilder(
+                  listenable:
+                      Listenable.merge([layout.height, layout.dragOffset]),
+                  builder: (context, child) => Transform.translate(
+                      offset: Offset(0, layout.dragOffset.value),
+                      child: SizedBox(
+                          height: (layout.height.value == null
+                                  ? available
+                                  : layout.height.value! +
+                                      (locked ? 0 : 24) +
+                                      MediaQuery.paddingOf(context).bottom)
+                              .clamp(1.0, available),
+                          width: constraints.maxWidth,
+                          child: ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(20)),
+                              child: Column(children: [
+                                if (!locked)
+                                  GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onVerticalDragUpdate: (event) => layout
+                                          .dragOffset
+                                          .value = (layout.dragOffset.value +
+                                              event.delta.dy)
                                           .clamp(0, available),
-                                  onVerticalDragEnd: (event) {
-                                    if (layout.dragOffset.value > 80 ||
-                                        (event.primaryVelocity ?? 0) > 700)
-                                      widget.controller.close();
-                                    else
-                                      layout.dragOffset.value = 0;
-                                  },
-                                  child: Container(
-                                      height: 24,
-                                      color: Theme.of(context)
-                                          .scaffoldBackgroundColor,
-                                      alignment: Alignment.center,
+                                      onVerticalDragEnd: (event) {
+                                        if (layout.dragOffset.value > 80 ||
+                                            (event.primaryVelocity ?? 0) > 700)
+                                          widget.controller.close();
+                                        else
+                                          layout.dragOffset.value = 0;
+                                      },
                                       child: Container(
-                                          width: 36,
-                                          height: 4,
-                                          decoration: BoxDecoration(
-                                              color: Colors.grey,
-                                              borderRadius:
-                                                  BorderRadius.circular(2))))),
-                            Expanded(
-                                child:
-                                    SafeArea(top: false, child: widget.child)),
-                          ]))))))
+                                          height: 24,
+                                          color: Theme.of(context)
+                                              .scaffoldBackgroundColor,
+                                          alignment: Alignment.center,
+                                          child: Container(
+                                              width: 36,
+                                              height: 4,
+                                              decoration: BoxDecoration(
+                                                  color: Colors.grey,
+                                                  borderRadius:
+                                                      BorderRadius.circular(2))))),
+                                Expanded(
+                                    child: SafeArea(
+                                        top: false, child: widget.child)),
+                              ]))))))
         ]);
       });
 
   /// 退出时注销所有监听和延迟任务，避免旧页影响下次展示。
   @override
   void dispose() {
-    _webWorker?.dispose();
-    _heightWorker?.dispose();
+    widget.controller.web.removeListener(_bindHeight);
+    _contentHeight?.removeListener(_reportHeight);
     layout.dispose();
     super.dispose();
   }

@@ -2,6 +2,8 @@
 
 高层入口负责配置、归因、页面包、回退、预渲染、展示和会话生命周期。宿主仍负责真实购买、恢复、权益验证、业务资格和法律页面。H5 只展示 `content.json` 与商店报价，并发送桥接动作。
 
+本文描述 1.0.0 API；0.2.0 使用旧的 GetX API。迁移和所有权约定见 [框架独立性与迁移](FRAMEWORK_INDEPENDENCE.md)。
+
 ## Git 依赖
 
 ```yaml
@@ -9,7 +11,7 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 0.2.0
+      ref: 1.0.0
 ```
 
 ## 查询与归因
@@ -47,10 +49,11 @@ POST 使用 `channelKey` 和 `conditions.version/device_type/language/country`�
 
 ## 宿主与展示
 
-在宿主 GetX 路由 Binding 中使用 `PaywallPresentationBinding` 注册协调器，或由已有 Binding 注册 `PaywallPresentationController`。不要在 Widget 中注册依赖。
+宿主 State 创建并持有 `PaywallPresentationController`，在 State.dispose 中调用其 dispose。普通 MaterialApp 即可使用；服务通过构造参数传入，SDK 不注册全局依赖。以下示例中的 context 必须位于目标 Navigator 下。
 
 ```dart
-final coordinator = Get.find<PaywallPresentationController>();
+// 在宿主 State 中创建一次，不要在 build 内重复创建。
+final coordinator = PaywallPresentationController();
 
 // 宿主页面用此容器承载隐藏预渲染；showLoading 可用于被动入口静默准备。
 PaywallHost(
@@ -60,7 +63,10 @@ PaywallHost(
   preparationIdentity: currentEligibilityIdentity,
 );
 
-final presenter = PaywallPresenter(controller: coordinator);
+final presenter = PaywallPresenter(
+  controller: coordinator,
+  navigator: Navigator.of(context), // 需要覆盖整个应用时显式选 rootNavigator: true。
+);
 await presenter.present(
   placement: 'banner',
   waitsForReady: true,

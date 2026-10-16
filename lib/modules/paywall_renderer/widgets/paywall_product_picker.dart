@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import '../controllers/paywall_runtime_controller.dart';
 import '../models/paywall_store_product.dart';
 
@@ -10,7 +9,15 @@ class PaywallProductPicker extends StatelessWidget {
   final String nodeId;
 
   @override
-  Widget build(BuildContext context) => Obx(() {
+  Widget build(BuildContext context) => ListenableBuilder(
+      listenable: Listenable.merge([
+        controller.products,
+        controller.selectedRef,
+        controller.isLoading,
+        controller.loadFailed,
+        controller.isPurchasing
+      ]),
+      builder: (context, child) {
         if (controller.isLoading.value)
           return Semantics(
               label: controller.copy.loading,
@@ -23,7 +30,8 @@ class PaywallProductPicker extends StatelessWidget {
           ]);
         }
         return Column(children: [
-          for (final product in controller.products) _product(context, product)
+          for (final product in controller.products.value)
+            _product(context, product)
         ]);
       });
 

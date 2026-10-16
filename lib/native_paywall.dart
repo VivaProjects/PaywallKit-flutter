@@ -6,7 +6,6 @@ export 'modules/paywall_renderer/models/paywall_runtime_copy.dart';
 export 'modules/paywall_renderer/services/paywall_configuration_service.dart';
 export 'modules/paywall_renderer/services/paywall_purchase_bridge.dart';
 export 'modules/paywall_renderer/controllers/paywall_runtime_controller.dart';
-export 'modules/paywall_renderer/bindings/paywall_renderer_binding.dart';
 export 'modules/paywall_renderer/views/paywall_renderer_view.dart';
 export 'modules/paywall_renderer/models/paywall_remote_options.dart';
 export 'modules/paywall_renderer/models/paywall_resolution.dart';
@@ -15,7 +14,6 @@ export 'modules/web_paywall/models/web_paywall_document.dart';
 export 'modules/web_paywall/models/web_paywall_environment.dart';
 export 'modules/web_paywall/controllers/web_paywall_controller.dart';
 export 'modules/web_paywall/services/web_paywall_preloader.dart';
-export 'modules/web_paywall/bindings/web_paywall_binding.dart';
 export 'modules/web_paywall/views/web_paywall_view.dart';
 export 'modules/web_paywall/models/web_paywall_runtime_environment.dart';
 
@@ -30,12 +28,9 @@ export 'modules/paywall_client/models/paywall_placement.dart';
 export 'modules/paywall_client/services/paywall_client.dart';
 export 'modules/paywall_client/services/paywall_configuration_source.dart';
 export 'modules/paywall_client/services/paywall_query_response.dart';
-export 'modules/paywall_client/bindings/paywall_session_binding.dart';
 
 export 'modules/paywall_client/controllers/paywall_flow_controller.dart';
 export 'modules/paywall_client/controllers/paywall_presentation_controller.dart';
-export 'modules/paywall_client/bindings/paywall_flow_binding.dart';
-export 'modules/paywall_client/bindings/paywall_presentation_binding.dart';
 export 'modules/paywall_client/models/paywall_failure.dart';
 export 'modules/paywall_client/models/paywall_session_input.dart';
 export 'modules/paywall_client/models/paywall_session_event.dart';
@@ -58,3 +53,4 @@ export 'modules/paywall_client/models/paywall_request_parameters.dart';
 export 'modules/paywall_client/services/paywall_cached_preload.dart';
 
 export 'modules/paywall_client/services/paywall_storekit_product_mapper.dart';
+export 'modules/paywall_client/services/paywall_session_factory.dart';

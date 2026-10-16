@@ -1,4 +1,4 @@
-import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 import '../models/paywall_event.dart';
 import '../models/paywall_runtime_copy.dart';
 import '../models/paywall_snapshot.dart';
@@ -7,7 +7,7 @@ import '../services/paywall_purchase_bridge.dart';
 
 enum PaywallLegalRoute { privacy, terms }
 
-class PaywallRuntimeController extends GetxController {
+class PaywallRuntimeController {
   PaywallRuntimeController(
       {required this.snapshot,
       required this.bridge,
@@ -23,23 +23,27 @@ class PaywallRuntimeController extends GetxController {
   final void Function(PaywallLegalRoute) openLegal;
   final void Function(PaywallEvent) track;
   final PaywallRuntimeCopy copy;
-  final products = <PaywallStoreProduct>[].obs;
-  final selectedRef = RxnString();
-  final isLoading = false.obs;
-  final isPurchasing = false.obs;
-  final loadFailed = false.obs;
-  final message = RxnString();
+  final products = ValueNotifier<List<PaywallStoreProduct>>(const []);
+  final selectedRef = ValueNotifier<String?>(null);
+  final isLoading = ValueNotifier(false);
+  final isPurchasing = ValueNotifier(false);
+  final loadFailed = ValueNotifier(false);
+  final message = ValueNotifier<String?>(null);
   bool _closed = false;
 
-  @override
-  void onReady() {
-    super.onReady();
+  bool _started = false;
+
+  /// 首次挂载时记录曝光并加载商品，重复挂载不重复初始化。
+  void start() {
+    if (_closed || _started) return;
+    _started = true;
     _emit(PaywallEventName.paywallImpression);
     load();
   }
 
-  PaywallStoreProduct? get selectedProduct =>
-      products.firstWhereOrNull((v) => v.productRef == selectedRef.value);
+  PaywallStoreProduct? get selectedProduct => products.value
+      .where((v) => v.productRef == selectedRef.value)
+      .firstOrNull;
 
   /// 只刷新冻结的商品引用，不采纳返回值中额外的商品。
   Future<void> load() async {
@@ -51,21 +55,22 @@ class PaywallRuntimeController extends GetxController {
           await bridge.products(snapshot.productRefs, snapshot.storefrontGroup);
       if (_closed) return;
       _validateProducts(fetched);
-      products.assignAll(snapshot.productRefs
+      products.value = List.unmodifiable(snapshot.productRefs
           .expand((ref) => fetched.where((v) => v.productRef == ref)));
-      if (!products.any((v) => v.productRef == selectedRef.value)) {
+      if (!products.value.any((v) => v.productRef == selectedRef.value)) {
         final picker = snapshot.nodes.firstWhere((v) => v.catalogKey != null);
         final preferred =
             picker.selection == 'recommended' ? snapshot.recommendedRef : null;
-        selectedRef.value = products
-                .firstWhereOrNull((v) => v.productRef == preferred)
+        selectedRef.value = products.value
+                .where((v) => v.productRef == preferred)
+                .firstOrNull
                 ?.productRef ??
-            products.first.productRef;
+            products.value.first.productRef;
       }
       loadFailed.value = false;
     } catch (_) {
       if (_closed) return;
-      products.clear();
+      products.value = const [];
       selectedRef.value = null;
       loadFailed.value = true;
       message.value = copy.unavailable;
@@ -96,7 +101,7 @@ class PaywallRuntimeController extends GetxController {
     if (_closed ||
         isPurchasing.value ||
         isLoading.value ||
-        !products.contains(product)) return;
+        !products.value.contains(product)) return;
     selectedRef.value = product.productRef;
     _emit(PaywallEventName.paywallProductSelected, {
       'productRef': product.productRef,
@@ -125,7 +130,7 @@ class PaywallRuntimeController extends GetxController {
     await _transaction(null);
   }
 
-  /// 路由销毁后不回写 Rx；商店权益更新仍由宿主完成。
+  /// 路由销毁后不回写状态；商店权益更新仍由宿主完成。
   Future<void> _transaction(PaywallStoreProduct? product) async {
     message.value = null;
     final event = product == null
@@ -175,9 +180,15 @@ class PaywallRuntimeController extends GetxController {
     } catch (_) {/* 宿主分析适配层负责日志与重试。 */}
   }
 
-  @override
-  void onClose() {
+  /// 宿主卸载页面后释放状态，晚到的商店结果仍只更新宿主权益。
+  void dispose() {
+    if (_closed) return;
     _closed = true;
-    super.onClose();
+    products.dispose();
+    selectedRef.dispose();
+    isLoading.dispose();
+    isPurchasing.dispose();
+    loadFailed.dispose();
+    message.dispose();
   }
 }

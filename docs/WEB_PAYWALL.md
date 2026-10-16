@@ -11,7 +11,7 @@ SDK 只提供通用展示、桥接、配置校验与商店交互接口。H5 页�
 ## 宿主入口
 
 - iOS：可使用 `PaywallClient` / `PaywallPlacement` 的高层入口读取配置、准备页面并管理会话；也可直接组合 `WebPaywallDocument`、`PaywallHost`、`WebPaywallView`。配置格式由 `WebPaywallConfiguration` 校验，服务地址与业务条件由宿主提供。
-- Flutter：宿主解析单页 `WebPaywallDocument` 后创建 `WebPaywallController`，通过 `WebPaywallBinding` 注入独立路由会话。Flutter 当前没有与 iOS `PaywallClient` 对等的高层投放配置客户端；宿主负责投放 JSON 的获取和点位解析。
+- Flutter：宿主解析单页 `WebPaywallDocument` 后创建 `WebPaywallController`，通过 `WebPaywallView(controller: ...)` 显式注入独立会话。高层配置、回退与展示可使用 `PaywallClient` 和 `PaywallPresenter`，详见 [Flutter 高层接入](FLUTTER_CLIENT.md)。
 - 两端的 `PaywallPurchaseBridge` 均由宿主接入真实商店服务；接口实现方式见 [原生接入文档](INTEGRATION.md)。交易完成、权益校验和持久化由宿主负责。
 
 ## H5 数据边界
@@ -51,7 +51,7 @@ iOS SDK 的 `WebPaywallWebViewCache.preload` 可在展示前加载页面与商�
 
 iOS 的每个 `WebPaywallWebViewCache` 实例只保留一个已加载的 WKWebView 和它的桥接会话，可让 `fullScreenCover` 每次重新创建并保持系统动画。缓存键包含页面 URL、revision、商品引用、店面、外部环境配置和 `custom`；不匹配或页面故障时会重新加载。预加载与正式展示必须传入同一份环境配置和 `custom`。复用期间页面上的价格、环境信息和 `custom` 仍是首次注入值，因此商店国家、价格、资格或应用语言变化时应调用 `destroy()` 并用新商品重新预加载。宿主自行选择各点位的预加载和关闭后保留策略，刷新商品时销毁旧缓存。
 
-Flutter/GetX 可按入口持有 `WebPaywallPreloader(() => WebPaywallController(...))`。场景到达时调用 `preload()`；路由的 `WebPaywallBinding.createController` 使用 `preloader.take() ?? WebPaywallController(...)` 接管一次预加载会话。路由关闭时 GetX 调用 `onClose()` 阻断桥接并释放路由持有的 WebView；场景取消、商品或环境配置变化且尚未展示时调用 `preloader.destroy()`。预加载器会在 `preload()` 和 `take()` 时重新读取 `custom`，变化后销毁旧会话。Flutter 插件没有同步销毁原生 WebView 的公开方法，实际原生资源释放由 `WebViewWidget` 卸载和平台插件管理，宿主不要继续持有已关闭的 controller。每个入口使用独立句柄，且只有文档、店面、商品资格、环境配置和 `custom` 未变化时才复用。
+Flutter 可按入口持有 `WebPaywallPreloader(() => WebPaywallController(...))`。场景到达时调用 `preload()`；展示时使用 `preloader.take() ?? WebPaywallController(...)` 接管一次预加载会话。视图卸载时默认调用 `dispose()` 阻断桥接并释放路由持有的 WebView；场景取消、商品或环境配置变化且尚未展示时调用 `preloader.destroy()`。预加载器会在 `preload()` 和 `take()` 时重新读取 `custom`，变化后销毁旧会话。Flutter 插件没有同步销毁原生 WebView 的公开方法，实际原生资源释放由 `WebViewWidget` 卸载和平台插件管理，宿主不要继续持有已关闭的 controller。每个入口使用独立句柄，且只有文档、店面、商品资格、环境配置和 `custom` 未变化时才复用。
 
 ```swift
 // iOS：每个入口单独持有，按业务时机调用 preload。
@@ -68,7 +68,8 @@ cache.preload(document: document, storefrontGroup: storefrontGroup,
 ```
 
 ```dart
-// Flutter：factory 同时供预加载和没有热页时的普通打开使用。
+// Flutter：在宿主导航可用后创建；factory 同时供预加载和普通打开使用。
+final navigator = Navigator.of(context);
 WebPaywallController makeController() => WebPaywallController(
   document: document, storefrontGroup: storefrontGroup, bridge: bridge,
   environment: WebPaywallEnvironment(
@@ -76,18 +77,17 @@ WebPaywallController makeController() => WebPaywallController(
     country: storeCountryAlpha3, appVersion: appVersion,
   ),
   custom: {'entry': 'onboarding', 'context': {'screen': 'intro', 'step': 2}},
-  allowsDismiss: true, dismiss: () => Get.back<void>(),
+  allowsDismiss: true, dismiss: () => navigator.pop(),
   openLegal: openLegal,
 );
 final preloader = WebPaywallPreloader(makeController);
 preloader.preload(); // 宿主选择的场景，例如进入购买流程之前。
-Get.to(
-  () => WebPaywallView(sessionTag: sessionTag, nativeFallback: nativeFallback),
-  binding: WebPaywallBinding(
-    sessionTag: sessionTag,
-    createController: () => preloader.take() ?? makeController(),
+final controller = preloader.take() ?? makeController();
+await navigator.push(MaterialPageRoute<void>(
+  builder: (_) => WebPaywallView(
+    controller: controller, nativeFallback: nativeFallback,
   ),
-);
+));
 // 未展示的预加载失效时：preloader.destroy();
 ```
 

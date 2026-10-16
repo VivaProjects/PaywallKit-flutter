@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import '../services/web_paywall_diagnostics.dart';
 
-import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../paywall_renderer/models/paywall_store_product.dart';
@@ -20,7 +20,7 @@ part 'web_paywall_actions.dart';
 part 'web_paywall_protocol.dart';
 
 /// WebView 只负责展示；价格、购买和恢复仍走宿主商店接口。
-class WebPaywallController extends GetxController {
+class WebPaywallController {
   WebPaywallController(
       {required this.document,
       required this.storefrontGroup,
@@ -82,14 +82,14 @@ class WebPaywallController extends GetxController {
   void Function(String)? onResourceSource;
   void Function(String)? onActionFailure;
   final bool requiresRenderReady;
-  final contentHeight = RxnDouble();
+  final contentHeight = ValueNotifier<double?>(null);
   bool _attached = false;
   bool _productsLoading = false;
   bool allowsDismiss;
   void Function() dismiss;
   void Function(String) openLegal;
-  final failed = false.obs;
-  final ready = false.obs;
+  final failed = ValueNotifier(false);
+  final ready = ValueNotifier(false);
   late final WebViewController webView;
   final Map<String, PaywallStoreProduct> _products = {};
   late final String _sessionID =
@@ -113,9 +113,8 @@ class WebPaywallController extends GetxController {
   }
 
   /// 路由接管预加载会话时才启动首屏超时；普通页面直接开始加载。
-  @override
-  void onInit() {
-    super.onInit();
+  void start() {
+    if (!_active) return;
     _attached = true;
     trace("session.attach", "preloaded=$_started");
     if (_started) {
@@ -133,13 +132,19 @@ class WebPaywallController extends GetxController {
   }
 
   bool get awaitingProducts => _productsLoading;
+  bool get isProcessing => _busy;
   bool get canRetain => isReusable && ready.value && !_busy;
 
-  /// 保留已渲染表面时关闭动作，不让未挂载的缓存页操作宿主。
-  void detachPresentation() {
+  /// 暂时隐藏同一会话时关闭动作，保留重新显示需要的宿主回调。
+  void pausePresentation() {
     _attached = false;
     _readyTimer?.cancel();
     _readyTimer = null;
+  }
+
+  /// 保留已渲染表面时关闭动作，不让未挂载的缓存页操作宿主。
+  void detachPresentation() {
+    pausePresentation();
     onFailure = null;
     onRenderReady = null;
     onResourceSource = null;
@@ -185,7 +190,7 @@ class WebPaywallController extends GetxController {
       identical(onActionFailure, other.onActionFailure);
 
   /// 未进入路由的预加载页可主动终止并释放引用。
-  void destroyPreload() => _stop();
+  void destroyPreload() => dispose();
 
   /// 只创建一次 WebView，避免预加载与路由初始化重复导航。
   void _start({required bool preloading}) {
@@ -279,12 +284,17 @@ class WebPaywallController extends GetxController {
     return allowed;
   }
 
-  /// 销毁时取消本地等待，之后的异步结果不再写入 Rx 状态或页面。
-  @override
-  void onClose() {
+  /// 销毁时取消本地等待，之后的异步结果不再写入状态或页面。
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     _stop();
-    super.onClose();
+    contentHeight.dispose();
+    failed.dispose();
+    ready.dispose();
   }
+
+  bool _disposed = false;
 
   /// 终止页面加载，不尝试取消宿主已经发起的商店交易。
   void _stop() {
@@ -320,7 +330,7 @@ class WebPaywallController extends GetxController {
 
   /// 用户关闭后立刻阻断桥接，避免路由销毁之前继续投递消息。
   void close() {
-    if (!allowsDismiss || !_active || !_attached) return;
+    if (!allowsDismiss || !_active || !_attached || _busy) return;
     _stop();
     dismiss();
   }

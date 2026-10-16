@@ -55,7 +55,7 @@ let snapshot = try PaywallSnapshotFactory().decodeDocument(
 
 页面在商品加载失败时禁用购买，保留重试、恢复和法律入口。购买与恢复共享忙碌锁；购买结果仍由宿主负责完成业务导航。
 
-## Flutter/GetX
+## Flutter
 
 宿主 pubspec：
 
@@ -67,7 +67,7 @@ dependencies:
 
 ```dart
 import 'package:native_paywall/native_paywall.dart';
-import 'package:get/get.dart';
+import 'package:flutter/material.dart';
 
 final catalogs = {
   'default': PaywallCatalog(
@@ -79,27 +79,25 @@ final snapshot = await PaywallConfigurationService().loadBundled(
   assetIDs: {'movement_hero'},
 );
 
-// 每次打开使用不同 sessionTag；不要复用仍存在的路由实例。
-final sessionTag = 'paywall-${DateTime.now().microsecondsSinceEpoch}';
-Get.to(
-  () => PaywallRendererView(
-    sessionTag: sessionTag,
+// 异步加载后先确认宿主仍存活，每次展示创建独立控制器。
+if (!context.mounted) return;
+final navigator = Navigator.of(context);
+final controller = PaywallRuntimeController(
+  snapshot: snapshot, bridge: subscriptionBridge,
+  allowsDismiss: true, onDismiss: () => navigator.pop(),
+  openLegal: (route) { /* 宿主固定法律路由 */ },
+  track: (event) { /* 宿主事件转发 */ },
+);
+await navigator.push(MaterialPageRoute<void>(
+  builder: (_) => PaywallRendererView(
+    controller: controller,
     assetBuilder: (id) => id == 'movement_hero'
       ? Image.asset('assets/paywall_hero.png', fit: BoxFit.contain) : null,
   ),
-  binding: PaywallRendererBinding(
-    sessionTag: sessionTag,
-    createController: () => PaywallRuntimeController(
-      snapshot: snapshot, bridge: subscriptionBridge,
-      allowsDismiss: true, onDismiss: () => Get.back<void>(),
-      openLegal: (route) { /* 宿主固定法律路由 */ },
-      track: (event) { /* 宿主事件转发 */ },
-    ),
-  ),
-);
+));
 ```
 
-宿主 View 需要正常导入 `package:flutter/material.dart`。也可以将 `PaywallRendererBinding` 绑定到集中定义的 GetPage。不要在 View、build 或 Controller 中注册依赖。宿主的配置/购买/缓存服务由其 Binding 提供，Controller 仅接收构造注入。
+视图首次挂载调用 start，卸载默认调用 dispose。控制器应在事件回调或 State.initState 中创建，不能在 build 内反复创建。若由外部管理生命周期，传 `disposeController: false` 并在卸载后显式释放。配置、购买和缓存服务由宿主构造注入，不需要 Binding 或全局容器。
 
 独立服务端接入，`jsonString` 是宿主网络层取得的 UTF-8 JSON 字符串：
 
@@ -112,9 +110,9 @@ final snapshot = await PaywallConfigurationService().decodeDocument(
 );
 ```
 
-将返回的 Snapshot 注入上面的 route Binding。宿主负责下载、来源验证、缓存和回退；等待后检查生命周期，避免页面销毁后导航。解码失败可调用 `loadBundled`，再失败则使用宿主固定原生页面。
+将返回的 Snapshot 传入上面的控制器构造参数。宿主负责下载、来源验证、缓存和回退；等待后检查生命周期，避免页面销毁后导航。解码失败可调用 `loadBundled`，再失败则使用宿主固定原生页面。
 
-`PaywallPurchaseBridge` 的三个方法对应 iOS。Google Play 适配器必须使用真实 ProductDetails 和已确认资格的 offer；productRef 与 storeProductId 都由宿主映射，不把远端 JSON 直接转成交易参数。Controller 销毁后不再回写 Rx，已发起的交易与权益处理仍由宿主商店层完成。
+`PaywallPurchaseBridge` 的三个方法对应 iOS。Google Play 适配器必须使用真实 ProductDetails 和已确认资格的 offer；productRef 与 storeProductId 都由宿主映射，不把远端 JSON 直接转成交易参数。Controller 销毁后不再回写状态，已发起的交易与权益处理仍由宿主商店层完成。
 
 ## 原生资源与无障碍
 
