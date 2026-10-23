@@ -35,7 +35,10 @@ public final class PaywallResourcesPlugin implements FlutterPlugin {
                 return;
             }
             if (call.method.equals("environment")) {
-                HashMap<String, String> values = new HashMap<>();
+                HashMap<String, Object> values = new HashMap<>();
+                values.put("os", "Android");
+                values.put("isPad", binding.getApplicationContext().getResources()
+                    .getConfiguration().smallestScreenWidthDp >= 600);
                 values.put("language", Locale.getDefault().toLanguageTag());
                 values.put("deviceModel", Build.MODEL);
                 // 商店账户国家需由宿主 Billing 服务提供，不能用 Locale 国家冒充。

@@ -11,15 +11,17 @@ class PaywallEnvironmentProvider {
           WebPaywallRuntimeEnvironment.test,
       Future<String> Function()? storefrontCountry}) async {
     final values = await const MethodChannel('native_paywall/resources')
-        .invokeMapMethod<String, String>('environment');
+        .invokeMapMethod<String, Object>('environment');
     final country = storefrontCountry != null
         ? await storefrontCountry()
-        : values?['country'] ?? '';
+        : values?['country'] as String? ?? '';
     return WebPaywallEnvironment(
+        os: values?['os'] as String?,
+        isPad: values?['isPad'] as bool? ?? false,
         runtimeEnvironment: runtimeEnvironment,
-        language: values?['language'] ?? '',
-        deviceModel: values?['deviceModel'] ?? '',
-        appVersion: values?['appVersion'] ?? '',
+        language: values?['language'] as String? ?? '',
+        deviceModel: values?['deviceModel'] as String? ?? '',
+        appVersion: values?['appVersion'] as String? ?? '',
         country: country);
   }
 

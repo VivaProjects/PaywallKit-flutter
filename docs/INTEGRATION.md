@@ -149,3 +149,9 @@ SDK 通过 `track` 回调输出固定事件及文档版本，宿主转发现有�
 `PaywallStoreProduct.isEligibleForFreeTrial` 是可选布尔字段，iOS 与 Flutter bootstrap 均透传；未提供时 H5 应按无试用承诺展示。iOS 的 `PaywallStoreKitProductMapper` 仅在账户符合 introductory offer 资格且支付方式为 `freeTrial` 时返回 `true`。Flutter 接入方必须从商店资格适配层提供此值。页面按钮文案由 H5 维护，实际试用期限、金额及条件仍使用宿主的商店披露，不解析价格字符串猜测资格；协议版本保持 2。
 
 纯展示会话可由 iOS 宿主的 `PaywallPurchaseBridge.requiresStoreProducts` 显式返回 `false`（默认 `true`），允许空商品 bootstrap 并拒绝交易动作。此权限只由原生桥决定，H5 的 custom 不得授予交易权限；现有付费会话行为不变。
+
+## 1.2.0 设备参数接入
+
+升级依赖到 `1.2.0`。SDK 向 H5 的 `custom` 平铺注入 `os`（`iOS` / `Android`）与 `isPad`（布尔值），POST 查询在 `conditions` 中传同名字段；GET 使用字符串查询参数。设备参数变化后需新建会话。
+
+Git 依赖使用 `git@github.com:VivaProjects/PaywallKit-flutter.git`，`ref: 1.2.0`。推荐 `PaywallEnvironmentProvider.capture()` 自动采集；手动构造 `WebPaywallEnvironment` 时传 `os` 和 `isPad`，平板宿主务必传入实际值（手动构造默认 `isPad: false`）。完整 Flutter 接入见 [Flutter Client](FLUTTER_CLIENT.md)。

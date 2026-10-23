@@ -11,7 +11,7 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 1.0.0
+      ref: 1.2.0
 ```
 
 ## 查询与归因
@@ -43,7 +43,7 @@ await client.preloadConfiguration();
 
 默认环境由平台插件采集语言、机型、用户可见应用版本。iOS 15+ 自动读取 StoreKit 账户国家并监听变化；低版本无法取得时为空。Android 不把设备地区当商店国家，可通过 `environment` 回调调用 `PaywallEnvironmentProvider.capture(storefrontCountry: ...)` 对接宿主 Billing 服务，并传入 `storefrontChanges` 流。国家只接受空值或三位字母，统一大写。`runtimeEnvironment` 默认 `test`，生产必须显式配置；环境回调必须返回同一运行环境。
 
-POST 使用 `conditions.channel/version/device_type/language/country`。接口仅返回点位与 `h5Url`，商品绑定和版本从对应 `package.json` 读取；完整资源校验后才进入配置。坏页面只影响对应点位。`allowedOrigins: null` 显式关闭页面白名单，空集合拒绝所有页面。开发 HTTP 仅 Debug/Test 且来源与 `developmentHTTPOrigin` 完全一致时开放。
+POST 使用 `conditions.channel/version/device_type/language/country/os/isPad`。接口仅返回点位与 `h5Url`，商品绑定和版本从对应 `package.json` 读取；完整资源校验后才进入配置。坏页面只影响对应点位。`allowedOrigins: null` 显式关闭页面白名单，空集合拒绝所有页面。开发 HTTP 仅 Debug/Test 且来源与 `developmentHTTPOrigin` 完全一致时开放。
 
 标准 GET 配置可使用 `PaywallClient(configuration: PaywallConfigurationSource(...))`，通过 `PaywallRequestParameters(environment: ..., additional: ...).request(endpoint)` 生成稳定排序的参数。附加字段不能覆盖标准环境参数。自定义 `fetch` 对接宿主网络层时，宿主必须保留超时、响应大小、来源与重定向限制。
 
@@ -145,3 +145,11 @@ await presenter.present(
 `webview_flutter_android` 和 `webview_flutter_wkwebview` 从间接依赖改为直接依赖，用于公开原生 WebView 实例 ID 和长按控制。当前最低版本分别为 4.14.1 / 3.26.1，宿主需满足这些插件的 Flutter/Dart 平台要求；未新增宿主架构框架。
 
 查询式入口建议使用 `resolve(placement)` / `preloadConfiguration()`。若启动快照同时持有同 documentId 的不同版本，旧的聚合 `refresh()` 返回类型无法表达，SDK 明确报错而不把某点位替换成另一版本；各点位解析继续可用。
+
+### 查询设备参数
+
+POST 的 `conditions.os` 为 `"iOS"` 或 `"Android"`，`conditions.isPad` 为 JSON 布尔值，含义与 H5 `custom` 中的同名字段一致。iOS 自动读取设备 idiom；Flutter 使用本次查询环境中的值。完整 POST body 参与请求缓存身份。GET 请求对应使用 `os=iOS&isPad=false` 等字符串查询参数。
+
+```json
+{"conditions":{"channel":"organic","version":"1.0","device_type":"iPhone17,1","language":"en-US","country":"USA","os":"iOS","isPad":false}}
+```

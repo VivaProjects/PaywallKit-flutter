@@ -59,3 +59,11 @@ No H5 bridge payload or Flutter API is changed.
 ## Local Debug testing
 
 `PaywallQueryConfiguration(developmentHTTPOrigin:)` explicitly permits one HTTP origin for the query, package metadata, configuration validation and fallback update path in Debug + Test only. Release or production ignores this option. Page packages still require complete resource hashes and matching product bindings. The host must supply local networking permission and deploy complete immutable packages, not source directories.
+
+### 查询设备参数
+
+POST 的 `conditions.os` 为 `"iOS"` 或 `"Android"`，`conditions.isPad` 为 JSON 布尔值，含义与 H5 `custom` 中的同名字段一致。iOS 自动读取设备 idiom；Flutter 使用本次查询环境中的值。完整 POST body 参与请求缓存身份。GET 请求对应使用 `os=iOS&isPad=false` 等字符串查询参数。
+
+```json
+{"conditions":{"channel":"organic","version":"1.0","device_type":"iPhone17,1","language":"en-US","country":"USA","os":"iOS","isPad":false}}
+```

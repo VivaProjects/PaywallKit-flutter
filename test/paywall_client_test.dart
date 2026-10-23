@@ -6,7 +6,11 @@ import 'package:native_paywall/native_paywall.dart';
 import 'package:native_paywall/modules/web_paywall/models/web_paywall_custom.dart';
 
 const environment = WebPaywallEnvironment(
-    language: 'en', deviceModel: 'phone', country: 'usa', appVersion: '1');
+    os: 'iOS',
+    language: 'en',
+    deviceModel: 'phone',
+    country: 'usa',
+    appVersion: '1');
 final catalog = PaywallCatalog(
     productRefs: ['annual', 'compare'], recommendedRef: 'annual');
 Map<String, dynamic> payload({bool disabled = false}) => {
@@ -103,6 +107,7 @@ void main() {
     expect(jsonDecode(request().body!)['conditions']['country'], 'USA');
     expect(request('a').identity('app'), isNot(request('b').identity('app')));
     const production = WebPaywallEnvironment(
+        os: 'iOS',
         language: 'en',
         deviceModel: 'phone',
         country: 'USA',
@@ -113,6 +118,7 @@ void main() {
     expect(() => request(''), throwsFormatException);
     expect(
         () => const WebPaywallEnvironment(
+                os: 'iOS',
                 language: 'en',
                 deviceModel: 'phone',
                 country: 'US',

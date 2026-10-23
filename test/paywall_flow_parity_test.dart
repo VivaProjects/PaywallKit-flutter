@@ -35,7 +35,11 @@ class FlowBridge implements PaywallPurchaseBridge {
 }
 
 const env = WebPaywallEnvironment(
-    language: 'en', deviceModel: 'phone', country: 'USA', appVersion: '1');
+    os: 'iOS',
+    language: 'en',
+    deviceModel: 'phone',
+    country: 'USA',
+    appVersion: '1');
 String configuration(WebPaywallDocument doc) => jsonEncode({
       'version': 1,
       'placements': {'banner': doc.documentId},

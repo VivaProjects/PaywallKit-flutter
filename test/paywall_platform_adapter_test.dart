@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:native_paywall/native_paywall.dart';
@@ -16,6 +17,8 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'environment')
         return {
+          'os': 'iOS',
+          'isPad': true,
           'language': 'en-US',
           'country': 'CAN',
           'deviceModel': 'model',
@@ -38,6 +41,8 @@ void main() {
     final env = await PaywallEnvironmentProvider.capture(
         runtimeEnvironment: WebPaywallRuntimeEnvironment.production);
     expect(env.country, 'CAN');
+    expect(env.os, 'iOS');
+    expect(env.isPad, isTrue);
     expect(env.runtimeEnvironment, WebPaywallRuntimeEnvironment.production);
     final products = await PaywallStoreKitProductMapper.products(['annual']);
     expect(products.single.displayPrice, r'CA$9.99');
@@ -50,10 +55,48 @@ void main() {
   });
 
   test(
+      'device parameters retain types across query, placement and cache identity',
+      () {
+    WebPaywallEnvironment device(String os, bool isPad) =>
+        WebPaywallEnvironment(
+            os: os,
+            isPad: isPad,
+            language: 'en',
+            deviceModel: 'model',
+            country: 'USA',
+            appVersion: '1');
+    PaywallConfigurationRequest query(WebPaywallEnvironment env) =>
+        PaywallConfigurationRequest.query(
+            endpoint: Uri.parse('https://example.com/query'),
+            environment: env,
+            channelKey: 'organic');
+    final tablet = device('Android', true);
+    final request = query(tablet);
+    final conditions = (jsonDecode(request.body!) as Map)['conditions'] as Map;
+    expect(conditions['os'], 'Android');
+    expect(conditions['isPad'], isTrue);
+    expect(tablet.forPlacement('banner').toPayload()['isPad'], isTrue);
+    expect(tablet.forPlacement('banner').os, 'Android');
+    expect(request.identity('app'),
+        isNot(query(device('Android', false)).identity('app')));
+    expect(request.identity('app'),
+        isNot(query(device('iOS', true)).identity('app')));
+    final get = PaywallRequestParameters(environment: tablet)
+        .request(Uri.parse('https://example.com/config'));
+    expect(get.uri.queryParameters['os'], 'Android');
+    expect(get.uri.queryParameters['isPad'], 'true');
+    expect(() => device('android', false).toPayload(), throwsFormatException);
+  });
+
+  test(
       'GET parameters sort and preserve literal plus while refusing duplicate and reserved fields',
       () {
     const env = WebPaywallEnvironment(
-        language: 'en', deviceModel: 'phone', country: 'USA', appVersion: '1');
+        os: 'iOS',
+        language: 'en',
+        deviceModel: 'phone',
+        country: 'USA',
+        appVersion: '1');
     final parameters = PaywallRequestParameters(
         environment: env, additional: {'channel': 'a+b'});
     final request =

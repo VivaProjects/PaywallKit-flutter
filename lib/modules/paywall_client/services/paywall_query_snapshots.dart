@@ -88,6 +88,8 @@ extension PaywallQuerySnapshots on PaywallQueryRuntime {
         method: 'POST',
         body: record['requestBody'] as String,
         environment: WebPaywallEnvironment(
+            os: env['os'] as String?,
+            isPad: env['isPad'] as bool? ?? false,
             language: env['language'] as String,
             deviceModel: env['deviceModel'] as String,
             country: env['country'] as String,

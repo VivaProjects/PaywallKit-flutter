@@ -7,20 +7,27 @@ import '../lib/modules/web_paywall/models/web_paywall_session_identity.dart';
 /// 不启动 Flutter 引擎，验证环境注入和实际预加载身份函数。
 void main() {
   const test = WebPaywallEnvironment(
-      language: 'en', deviceModel: 'phone', country: 'USA', appVersion: '1');
+      os: 'iOS',
+      language: 'en',
+      deviceModel: 'phone',
+      country: 'USA',
+      appVersion: '1');
   const production = WebPaywallEnvironment(
+      os: 'iOS',
       language: 'en',
       deviceModel: 'phone',
       country: 'USA',
       appVersion: '1',
       runtimeEnvironment: WebPaywallRuntimeEnvironment.production);
   const banner = WebPaywallEnvironment(
+      os: 'iOS',
       language: 'en',
       deviceModel: 'phone',
       country: 'USA',
       appVersion: '1',
       placement: 'banner');
   const unlock = WebPaywallEnvironment(
+      os: 'iOS',
       language: 'en',
       deviceModel: 'phone',
       country: 'USA',

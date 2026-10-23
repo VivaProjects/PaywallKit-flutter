@@ -79,6 +79,7 @@ void main() {
                       placements: {'entry': 'settings'},
                       developmentHTTPOrigin: origin,
                       environment: () async => WebPaywallEnvironment(
+                          os: 'iOS',
                           language: 'en',
                           deviceModel: 'phone',
                           country: 'USA',

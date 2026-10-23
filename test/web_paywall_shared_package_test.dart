@@ -65,7 +65,11 @@ void main() {
             PaywallCatalog(productRefs: ['product'], recommendedRef: 'product'),
         loader: loader);
     const environment = WebPaywallEnvironment(
-        language: 'en', deviceModel: 'phone', country: '', appVersion: '1');
+        os: 'iOS',
+        language: 'en',
+        deviceModel: 'phone',
+        country: '',
+        appVersion: '1');
     final request = PaywallConfigurationRequest.query(
         endpoint: Uri.parse('https://example.com/query'),
         environment: environment,

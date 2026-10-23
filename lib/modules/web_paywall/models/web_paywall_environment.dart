@@ -1,15 +1,35 @@
+import 'dart:io';
 import 'web_paywall_runtime_environment.dart';
 
 /// 宿主提供的 H5 适配环境；设备型号不应包含唯一设备标识。
 class WebPaywallEnvironment {
   const WebPaywallEnvironment({
+    String? os,
+    this.isPad = false,
     this.placement = '',
     this.runtimeEnvironment = WebPaywallRuntimeEnvironment.test,
     required this.language,
     required this.deviceModel,
     required this.country,
     required this.appVersion,
-  });
+  }) : _os = os;
+
+  final String? _os;
+  final bool isPad;
+
+  /// 未覆盖系统时读取实际平台；不将非移动平台误报为 Android。
+  String get os {
+    final value = _os ??
+        (Platform.isIOS
+            ? 'iOS'
+            : Platform.isAndroid
+                ? 'Android'
+                : '');
+    if (value != 'iOS' && value != 'Android') {
+      throw const FormatException('os must be iOS or Android');
+    }
+    return value;
+  }
 
   final String placement;
   final WebPaywallRuntimeEnvironment runtimeEnvironment;
@@ -20,6 +40,8 @@ class WebPaywallEnvironment {
 
   /// 高层入口冻结实际点位，不从页面 ID 推断入口。
   WebPaywallEnvironment forPlacement(String value) => WebPaywallEnvironment(
+      os: os,
+      isPad: isPad,
       placement: value,
       runtimeEnvironment: runtimeEnvironment,
       language: language,
@@ -37,7 +59,9 @@ class WebPaywallEnvironment {
   }
 
   /// 仅将标准环境信息写入桥协议，不附带宿主页面文案。
-  Map<String, String> toPayload() => {
+  Map<String, Object> toPayload() => {
+        'os': os,
+        'isPad': isPad,
         'placement': placement,
         'runtimeEnvironment': runtimeEnvironment.name,
         'language': language,

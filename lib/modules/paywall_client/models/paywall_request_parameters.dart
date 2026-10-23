@@ -11,7 +11,10 @@ class PaywallRequestParameters {
 
   /// 稳定排序并编码查询参数，拒绝重复键和覆盖标准条件。
   PaywallConfigurationRequest request(Uri endpoint) {
-    final values = environment.toPayload()..remove('placement');
+    final values = environment
+        .toPayload()
+        .map((key, value) => MapEntry(key, value.toString()))
+      ..remove('placement');
     for (final entry in additional.entries) {
       if (entry.key.isEmpty || values.containsKey(entry.key))
         throw const FormatException('Reserved query parameter');

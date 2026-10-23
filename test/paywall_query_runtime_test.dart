@@ -39,6 +39,7 @@ void main() {
                     developmentHTTPOrigin: origin,
                     storefrontChanges: storefront.stream,
                     environment: () async => WebPaywallEnvironment(
+                        os: 'iOS',
                         language: 'en',
                         deviceModel: 'phone',
                         country: country,
@@ -88,6 +89,7 @@ void main() {
               return online.future;
             },
             environment: () async => const WebPaywallEnvironment(
+                os: 'iOS',
                 language: 'en',
                 deviceModel: 'phone',
                 country: 'USA',

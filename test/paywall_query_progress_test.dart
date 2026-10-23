@@ -35,6 +35,7 @@ void main() {
     final request = PaywallConfigurationRequest.query(
         endpoint: Uri.parse('https://example.com/query'),
         environment: const WebPaywallEnvironment(
+            os: 'iOS',
             language: 'en',
             deviceModel: 'phone',
             country: 'USA',

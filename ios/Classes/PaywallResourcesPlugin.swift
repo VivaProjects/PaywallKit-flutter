@@ -52,7 +52,8 @@ public final class PaywallResourcesPlugin: NSObject, FlutterPlugin, FlutterStrea
             Task { @MainActor in
                 var country = ""
                 if #available(iOS 15.0, *) { country = await Storefront.current?.countryCode ?? "" }
-                result(["language": Locale.preferredLanguages.first ?? "",
+                result(["os": "iOS", "isPad": UIDevice.current.userInterfaceIdiom == .pad,
+                        "language": Locale.preferredLanguages.first ?? "",
                         "deviceModel": Self.deviceModel(), "country": country,
                         "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""])
             }
