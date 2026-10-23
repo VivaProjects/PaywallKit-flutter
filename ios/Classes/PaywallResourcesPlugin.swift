@@ -3,13 +3,16 @@ import Foundation
 import StoreKit
 import UIKit
 import Darwin
+import webview_flutter_wkwebview
 
 /// 提供私有存储、设备适配信息与商店国家更新，不传入页面文案。
 public final class PaywallResourcesPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+    private var registrar: FlutterPluginRegistrar?
     private var storefrontTask: Task<Void, Never>?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = PaywallResourcesPlugin()
+        instance.registrar = registrar
         let channel = FlutterMethodChannel(name: "native_paywall/resources", binaryMessenger: registrar.messenger())
         registrar.addMethodCallDelegate(instance, channel: channel)
         let events = FlutterEventChannel(name: "native_paywall/storefront", binaryMessenger: registrar.messenger())
@@ -18,6 +21,18 @@ public final class PaywallResourcesPlugin: NSObject, FlutterPlugin, FlutterStrea
 
     /// 国家仅由 StoreKit 账户提供；低版本无法获取时保留空字符串。
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        if call.method == "disableLongPress" {
+            guard let args = call.arguments as? [String: Any],
+                  let identifier = args["identifier"] as? NSNumber,
+                  let script = args["script"] as? String, let registrar,
+                  let webView = WebViewFlutterWKWebViewExternalAPI.webView(
+                    forIdentifier: identifier.int64Value, withPluginRegistrar: registrar) else {
+                result(FlutterError(code: "webview", message: "WebView unavailable", details: nil)); return
+            }
+            webView.addGestureRecognizer(PaywallInteractionPolicy(webView: webView, script: script))
+            result(nil)
+            return
+        }
         if call.method == "storeProducts" {
             guard let arguments = call.arguments as? [String: Any],
                   let ids = arguments["productRefs"] as? [String], !ids.isEmpty, ids.count <= 100,

@@ -27,6 +27,8 @@ class FakeNavigationDelegate extends PlatformNavigationDelegate {
   @override
   Future<void> setOnPageStarted(PageEventCallback callback) async {}
   @override
+  Future<void> setOnPageFinished(PageEventCallback callback) async {}
+  @override
   Future<void> setOnWebResourceError(WebResourceErrorCallback callback) async {}
 }
 

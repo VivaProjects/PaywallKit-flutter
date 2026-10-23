@@ -135,6 +135,12 @@ void main() {
     final flow = create();
     final preload = PaywallPreload();
     preload.start(flow, cacheIdentity: 'price-v1');
+    // 等待异步资源准备完成，避免固定 30ms 在并行测试下抢先访问 WebView。
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (flow.web.value == null && DateTime.now().isBefore(deadline)) {
+      await settle();
+    }
+    expect(flow.web.value, isNotNull);
     await bootstrap(platform);
     await ready(platform);
     expect(preload.isReady, isTrue);

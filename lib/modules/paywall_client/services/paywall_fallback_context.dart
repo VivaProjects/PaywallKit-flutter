@@ -63,7 +63,10 @@ class PaywallFallbackContext {
       }
       local = true;
     } else {
-      if (bundledOnly || selected?.source != 'update') return null;
+      if (bundledOnly ||
+          selected?.source != 'update' &&
+              !(client.usesLaunchSnapshot && selected?.source == 'disk'))
+        return null;
       bundledOnly = true;
     }
     retryDeadline();
@@ -73,6 +76,10 @@ class PaywallFallbackContext {
   /// 本地包整体替换页面商品绑定，同时保留真实入口用于 H5 与日志。
   Future<PaywallPlacement> _local() async {
     _checkDisabled();
+    if (!bundledOnly && client.queryFallbackAtLaunch != null) {
+      final cached = await client.queryFallbackAtLaunch!();
+      if (cached != null) return selected = _withReason(cached);
+    }
     final value = await store!.selection(bundledOnly: bundledOnly);
     final environment = await client.currentEnvironment();
     if (environment.runtimeEnvironment.name != store!.archive.environment)

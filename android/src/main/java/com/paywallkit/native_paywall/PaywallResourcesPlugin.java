@@ -1,6 +1,8 @@
 package com.paywallkit.native_paywall;
 
 import java.util.HashMap;
+import android.webkit.WebView;
+import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi;
 import java.util.Locale;
 import android.os.Build;
 import android.content.pm.PackageManager;
@@ -17,6 +19,21 @@ public final class PaywallResourcesPlugin implements FlutterPlugin {
     public void onAttachedToEngine(FlutterPluginBinding binding) {
         channel = new MethodChannel(binding.getBinaryMessenger(), "native_paywall/resources");
         channel.setMethodCallHandler((call, result) -> {
+            if (call.method.equals("disableLongPress")) {
+                Number identifier = call.argument("identifier");
+                WebView view = identifier == null ? null :
+                    WebViewFlutterAndroidExternalApi.getWebView(binding, identifier.longValue());
+                if (view == null) {
+                    result.error("webview", "WebView unavailable", null);
+                } else {
+                    // 仅拦截长按；普通点击、滚动和 JS 购买桥保持原行为。
+                    view.setOnLongClickListener(v -> true);
+                    view.setLongClickable(false);
+                    view.setHapticFeedbackEnabled(false);
+                    result.success(null);
+                }
+                return;
+            }
             if (call.method.equals("environment")) {
                 HashMap<String, String> values = new HashMap<>();
                 values.put("language", Locale.getDefault().toLanguageTag());

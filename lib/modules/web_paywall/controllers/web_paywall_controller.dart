@@ -1,7 +1,9 @@
 import '../../paywall_client/models/paywall_failure.dart';
 import 'dart:convert';
+import '../../paywall_renderer/services/paywall_store_action_policy.dart';
 import 'dart:async';
 import '../services/web_paywall_diagnostics.dart';
+import '../services/web_paywall_interaction_policy.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -71,7 +73,9 @@ class WebPaywallController {
         sessionPolicy?.custom,
         sessionPolicy?.nextPlacement,
         allowsDismiss,
-        requiresRenderReady
+        requiresRenderReady,
+        requiresStoreProducts,
+        allowsStoreActions
       ]);
   PaywallPurchaseBridge bridge;
   final WebPaywallSessionPolicy? sessionPolicy;
@@ -99,6 +103,23 @@ class WebPaywallController {
   bool _started = false;
   bool _bridgeReady = false;
   bool _bootstrapSent = false;
+  bool _productsLoaded = false;
+  bool _productsDelivered = false;
+  bool _supportsDeferredProducts = false;
+  int _presentationID = 0;
+
+  /// 可选策略独立控制展示依赖与交易权限，兼容旧宿主桥。
+  bool get requiresStoreProducts =>
+      bridge is! PaywallStoreActionPolicy ||
+      (bridge as PaywallStoreActionPolicy).requiresStoreProducts;
+  bool get allowsStoreActions =>
+      bridge is! PaywallStoreActionPolicy ||
+      (bridge as PaywallStoreActionPolicy).allowsStoreActions;
+
+  /// 曝光保留 H5 的原始请求顺序，旧页无显式请求时返回空列表。
+  List<String> get requestedProductRefs => List.unmodifiable(
+      _expectsProductRequest ? _requestedProductRefs ?? const [] : const []);
+
   bool _expectsProductRequest = false;
   List<String>? _requestedProductRefs;
   bool _bootstrapped = false;
@@ -119,6 +140,7 @@ class WebPaywallController {
     trace("session.attach", "preloaded=$_started");
     if (_started) {
       _beginPresentationDeadline();
+      _notifyPresentation();
     } else {
       _start(preloading: false);
     }
@@ -129,6 +151,7 @@ class WebPaywallController {
     if (!_active) return;
     _attached = true;
     _beginPresentationDeadline();
+    _notifyPresentation();
   }
 
   bool get awaitingProducts => _productsLoading;
@@ -137,7 +160,19 @@ class WebPaywallController {
 
   /// 暂时隐藏同一会话时关闭动作，保留重新显示需要的宿主回调。
   void pausePresentation() {
+    if (_attached && ready.value) {
+      unawaited(_send({
+        'type': 'presentationState',
+        'sessionID': _sessionID,
+        'visible': false
+      }));
+      unawaited(webView
+          .runJavaScript(
+              "for (const e of new Set([document.scrollingElement, ...document.querySelectorAll('*')])) { if (e && e.scrollTop) e.scrollTo({top: 0, left: e.scrollLeft, behavior: 'instant'}); }")
+          .catchError((Object _) {}));
+    }
     _attached = false;
+    _presentationID++;
     _readyTimer?.cancel();
     _readyTimer = null;
   }
@@ -224,6 +259,12 @@ class WebPaywallController {
           // 一次会话不允许主文档重载后继续使用旧商品状态。
           if (_bridgeReady) _fail("unexpected_navigation");
         },
+        onPageFinished: (_) {
+          if (_active)
+            unawaited(webView
+                .runJavaScript(WebPaywallInteractionPolicy.script)
+                .catchError((Object _) => _fail('interaction_policy')));
+        },
         onWebResourceError: (error) {
           if (error.isForMainFrame ?? true)
             _fail("navigation_code_${error.errorCode}");
@@ -236,6 +277,8 @@ class WebPaywallController {
         await webView.removeJavaScriptChannel('PaywallBridge');
         return;
       }
+      await WebPaywallInteractionPolicy.install(webView);
+      if (!_active) return;
       await _loadPage();
     } catch (_) {
       _fail();

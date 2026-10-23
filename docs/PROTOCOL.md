@@ -27,6 +27,9 @@
 历史签名与分桶测试向量保留在 `protocol/vectors.json`，仅供已有可选远端适配器兼容性检查，不是新服务端的必选协议。
 
 
-Web H5 bootstrap 的 `environment.runtimeEnvironment` 为可选字符串枚举 `test` / `production`，缺失按 `test` 处理，非法值拒绝。该字段属于桥接 v2 的兼容扩展；其他环境字段、交易与商品精确 ID 规则保持不变。环境在会话内冻结，并参与配置及 WebView 缓存身份。
+Web H5 bootstrap 的 `custom.runtimeEnvironment` 为可选字符串枚举 `test` / `production`，缺失按 `test` 处理，非法值拒绝。该字段属于桥接 v2 的兼容扩展；其他环境字段、交易与商品精确 ID 规则保持不变。环境在会话内冻结，并参与配置及 WebView 缓存身份。
 
-`environment.placement` 为可选的实际会话点位字符串，缺省为空；由宿主解析点位后注入。H5 只读取，不决定路由，桥接版本保持 v2。
+`custom.placement` 为可选的实际会话点位字符串，缺省为空；由宿主解析点位后注入。H5 只读取，不决定路由，桥接版本保持 v2。
+
+
+桥 v2 的标准环境字段平铺在 `custom`，不新增顶层 environment。可协商能力 `deferredProducts` 必须同时声明 `productRequest` / `renderReady`：先空商品 bootstrap，后 productsUpdated。宿主通过 presentationState 通知正式显示/隐藏；所有消息保留当前 sessionID，价格仅来源于商店。旧页仍沿用原握手。

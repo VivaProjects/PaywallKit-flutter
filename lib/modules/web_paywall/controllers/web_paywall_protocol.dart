@@ -34,22 +34,7 @@ extension WebPaywallProtocol on WebPaywallController {
   Future<void> _handleEvent(Object? type, Map<String, dynamic> decoded) async {
     switch (type) {
       case 'ready':
-        if (_bridgeReady) return;
-        if (decoded['bridgeVersion'] != 2) {
-          _fail();
-          return;
-        }
-        _bridgeReady = true;
-        final capabilities = decoded['capabilities'];
-        _expectsRenderReady =
-            capabilities is List && capabilities.contains('renderReady');
-        if (requiresRenderReady && !_expectsRenderReady) {
-          _fail();
-          return;
-        }
-        _expectsProductRequest =
-            capabilities is List && capabilities.contains('productRequest');
-        await _sendSessionContext();
+        await _receiveReady(decoded);
       case 'productsRequest':
         await _receiveProductRequest(decoded);
       case 'bootstrapped':
@@ -84,6 +69,30 @@ extension WebPaywallProtocol on WebPaywallController {
       case 'privacy':
         if (_attached) openLegal('privacy');
     }
+  }
+
+  /// ready 只握手一次，完整能力组合决定是否允许商品延迟补齐。
+  Future<void> _receiveReady(Map<String, dynamic> decoded) async {
+    if (_bridgeReady) return;
+    if (decoded['bridgeVersion'] != 2) {
+      _fail();
+      return;
+    }
+    _bridgeReady = true;
+    final capabilities = decoded['capabilities'];
+    _expectsRenderReady =
+        capabilities is List && capabilities.contains('renderReady');
+    if (requiresRenderReady && !_expectsRenderReady) {
+      _fail();
+      return;
+    }
+    _expectsProductRequest =
+        capabilities is List && capabilities.contains('productRequest');
+    _supportsDeferredProducts = _expectsProductRequest &&
+        _expectsRenderReady &&
+        capabilities is List &&
+        capabilities.contains('deferredProducts');
+    await _sendSessionContext();
   }
 
   /// 环境先发送给页面，旧页在 ready 后沿用发布清单。
@@ -134,9 +143,13 @@ extension WebPaywallProtocol on WebPaywallController {
     trace("products.start", "requested=${_requestedProductRefs?.length ?? 0}");
     _productsLoading = true;
     try {
-      final values =
-          await bridge.products(_requestedProductRefs!, storefrontGroup);
+      if (_supportsDeferredProducts) await _bootstrapIfPossible();
+      final query = bridge.products(_requestedProductRefs!, storefrontGroup);
+      final values = await (_supportsDeferredProducts
+          ? query.timeout(const Duration(seconds: 12))
+          : query);
       if (!_active) return;
+      _productsLoaded = true;
       _products.clear();
       for (final product in values) {
         if (_requestedProductRefs!.contains(product.productRef)) {
@@ -150,8 +163,9 @@ extension WebPaywallProtocol on WebPaywallController {
           ? <String>[]
           : document.productRefs.where(
               (ref) => !sessionPolicy!.optionalProductRefs.contains(ref));
-      if (_products.isEmpty ||
-          requiredRefs.any((ref) => !_products.containsKey(ref))) {
+      if (requiresStoreProducts &&
+          (_products.isEmpty ||
+              requiredRefs.any((ref) => !_products.containsKey(ref)))) {
         _fail("products_empty");
         return;
       }
@@ -166,10 +180,16 @@ extension WebPaywallProtocol on WebPaywallController {
 
   /// 桥与商品同时就绪才注入，重复 ready 不会重复查询或重置交易状态。
   Future<void> _bootstrapIfPossible() async {
-    if (!_active || !_bridgeReady || _products.isEmpty || _bootstrapSent) {
+    if (!_active ||
+        !_bridgeReady ||
+        (!_supportsDeferredProducts && !_productsLoaded) ||
+        _productsDelivered) {
       return;
     }
+    final updating = _bootstrapSent;
+    if (updating && !_productsLoaded) return;
     _bootstrapSent = true;
+    _productsDelivered = _productsLoaded;
     final visible =
         _requestedProductRefs!.where(_products.containsKey).map((ref) {
       final product = _products[ref]!;
@@ -187,7 +207,8 @@ extension WebPaywallProtocol on WebPaywallController {
       };
     }).toList();
     await _send({
-      'type': 'bootstrap',
+      'type': updating ? 'productsUpdated' : 'bootstrap',
+      'capabilities': ['presentationState'],
       'bridgeVersion': 2,
       'sessionID': _sessionID,
       'custom': {
@@ -206,6 +227,17 @@ extension WebPaywallProtocol on WebPaywallController {
     return !_expectsRenderReady;
   }
 
+  /// 首屏就绪且正式挂载后通知页面，预加载不消耗动画。
+  void _notifyPresentation() {
+    if (!_active || !_attached || !ready.value) return;
+    unawaited(_send({
+      'type': 'presentationState',
+      'sessionID': _sessionID,
+      'presentationID': _presentationID,
+      'visible': true
+    }));
+  }
+
   /// 收到适用协议的完成回执后才移除加载遮罩。
   void _finishRendering() {
     if (!_active || ready.value) return;
@@ -213,5 +245,6 @@ extension WebPaywallProtocol on WebPaywallController {
     trace("render.ready");
     ready.value = true;
     onRenderReady?.call();
+    _notifyPresentation();
   }
 }

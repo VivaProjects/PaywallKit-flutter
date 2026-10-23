@@ -26,7 +26,8 @@ class PaywallPresenter {
       bool Function()? canPresent,
       bool followNextPlacement = true,
       void Function()? onDismiss,
-      void Function()? onPresented}) async {
+      void Function()? onPresented,
+      bool presentsImmediately = false}) async {
     final visited = <String>{};
     String? next = placement;
     PaywallSessionEventType? result;
@@ -37,8 +38,8 @@ class PaywallPresenter {
       PaywallFlowController? flow;
       try {
         flow = create(next);
-        final selected = await _prepare(
-            flow, token, waitsForReady, preload, cacheIdentity, canPresent);
+        final selected = await _prepare(flow, token, waitsForReady, preload,
+            cacheIdentity, canPresent, presentsImmediately);
         if (selected == null) return null;
         result = await _show(selected, onPresented, showBackButton);
         next = followNextPlacement && result == PaywallSessionEventType.closed
@@ -62,7 +63,8 @@ class PaywallPresenter {
       bool waits,
       PaywallPreload? preload,
       Object identity,
-      bool Function()? canPresent) async {
+      bool Function()? canPresent,
+      bool presentsImmediately) async {
     if (canPresent?.call() == false) {
       fresh.dispose();
       return null;
@@ -85,7 +87,7 @@ class PaywallPresenter {
       flow = controller.preparation
           .consume(flow.client, flow.placement, cacheIdentity: identity);
       if (flow == null) return null;
-    } else {
+    } else if (!presentsImmediately) {
       await Future.any([flow.load(), controller.cancellation]);
     }
     // 先让准备 WebView 从布局树退出，再把同一实例放入真实路由。
@@ -114,8 +116,12 @@ class PaywallPresenter {
     flow.failure.addListener(changed);
     changed();
     try {
-      await Future.any([done.future, controller.cancellation])
-          .timeout(flow.timeout, onTimeout: () {});
+      final waiting = Future.any([done.future, controller.cancellation]);
+      if (flow.client.usesLaunchSnapshot) {
+        await waiting;
+      } else {
+        await waiting.timeout(flow.timeout, onTimeout: () {});
+      }
     } finally {
       flow.ready.removeListener(changed);
       flow.failure.removeListener(changed);
@@ -173,6 +179,7 @@ class PaywallPresenter {
   /// 等待完整退场后释放本次会话，外部路由不会被误关闭。
   Future<PaywallSessionEventType?> _show(PaywallFlowController flow,
       void Function()? onPresented, bool showBackButton) async {
+    flow.presentationFrozen = true;
     final route = _createRoute(flow, showBackButton);
     flow.onExit = (result) {
       if (route.isCurrent) {

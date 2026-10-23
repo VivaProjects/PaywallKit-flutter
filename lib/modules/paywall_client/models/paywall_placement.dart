@@ -11,11 +11,13 @@ class PaywallPlacement {
       required this.environment,
       required this.presentation,
       this.sessionPolicy,
+      this.remoteDocument,
       this.requestIdentity,
       this.configurationSnapshot,
       this.clientIdentity,
       this.source = 'remote_or_cache',
       this.fallbackReason});
+  final WebPaywallDocument? remoteDocument;
   final String? requestIdentity;
   final String? configurationSnapshot;
   final Object? clientIdentity;

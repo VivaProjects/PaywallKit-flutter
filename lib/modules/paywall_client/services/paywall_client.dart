@@ -43,6 +43,12 @@ class PaywallClient {
   }
 
   final PaywallConfigurationSource configuration;
+  Future<PaywallPlacement?> Function(String)? queryResolver;
+  PaywallPlacement? Function(String)? queryCachedPlacement;
+  Future<void> Function()? queryPrepare;
+  Future<PaywallPlacement?> Function()? queryFallbackAtLaunch;
+  Future<WebPaywallConfiguration> Function()? queryRefresh;
+  bool get usesLaunchSnapshot => queryResolver != null;
   final Object identity = Object();
   final Set<String> retainedPlacements;
   final _pages =
@@ -82,6 +88,7 @@ class PaywallClient {
 
   /// 同步读取当前配置，重复入口无需等待新的网络结果。
   PaywallPlacement? cachedPlacement(String placement) {
+    if (queryCachedPlacement != null) return queryCachedPlacement!(placement);
     final config = _cached;
     final request = _request;
     if (config == null || request == null || isPlacementDisabled(placement))
@@ -101,6 +108,10 @@ class PaywallClient {
 
   /// 仅预取配置；网页预渲染使用可消费的 PaywallPreload 句柄。
   Future<void> preloadConfiguration() async {
+    if (queryPrepare != null) {
+      await queryPrepare!();
+      return;
+    }
     await refresh(force: false);
   }
 
@@ -140,12 +151,13 @@ class PaywallClient {
         history == null ||
         selected.requestIdentity == null ||
         selected.configurationSnapshot == null ||
-        selected.document.localDirectory != null ||
+        selected.document.localDirectory != null &&
+            selected.remoteDocument == null ||
         isPlacementDisabled(selected.name)) return;
     await history!.record(
         requestIdentity: selected.requestIdentity!,
         placement: selected.name,
-        document: selected.document,
+        document: selected.remoteDocument ?? selected.document,
         configuration: selected.configurationSnapshot!,
         isCurrent: () =>
             !_disposed && isCurrent() && !isPlacementDisabled(selected.name));
@@ -196,6 +208,7 @@ class PaywallClient {
 
   /// 相同请求共用配置；环境、归因或请求条件变化时清除旧快照。
   Future<WebPaywallConfiguration> refresh({bool force = true}) async {
+    if (queryRefresh != null) return queryRefresh!();
     final epoch = _epoch;
     final sequence = ++_requestSequence;
     final request = await configuration.request();
@@ -226,6 +239,7 @@ class PaywallClient {
 
   /// 缺失点位返回空值，显式禁用独立报错；失效旧请求不会取消新的展示等待者。
   Future<PaywallPlacement?> resolve(String placement) async {
+    if (queryResolver != null) return queryResolver!(placement);
     while (!_disposed) {
       final epoch = _epoch;
       try {

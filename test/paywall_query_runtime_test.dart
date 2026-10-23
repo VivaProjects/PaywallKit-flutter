@@ -9,7 +9,7 @@ class RealHttpOverrides extends HttpOverrides {}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-      'query runtime owns attribution and storefront invalidation with lifecycle cleanup',
+      'query runtime freezes one request despite attribution storefront and force refresh',
       () => HttpOverrides.runWithHttpOverrides(() async {
             final root = Directory(await (await Directory.systemTemp
                     .createTemp('paywall-query-runtime-'))
@@ -49,17 +49,15 @@ void main() {
             try {
               await client.reportAttribution(channel: 'paid');
               expect(await client.resolve('missing'), isNull);
-              expect(requests.single['channelKey'], 'paid');
-              final changed = observed.stream
-                  .firstWhere((value) => value['channelKey'] == 'other');
+              expect(requests.single.containsKey('channelKey'), isFalse);
+              expect(requests.single['conditions']['channel'], 'paid');
               await client.reportAttribution(channel: 'other');
-              await changed.timeout(const Duration(seconds: 5));
               country = 'CAN';
-              final moved = observed.stream.firstWhere(
-                  (value) => (value['conditions'] as Map)['country'] == 'CAN');
               storefront.add('CAN');
-              await moved.timeout(const Duration(seconds: 5));
-              expect(requests.last['channelKey'], 'other');
+              await client.refresh();
+              await client.resolve('missing');
+              await Future<void>.delayed(const Duration(milliseconds: 20));
+              expect(requests, hasLength(1));
               client.dispose();
               await Future<void>.delayed(const Duration(milliseconds: 20));
               expect(storefront.hasListener, isFalse);
@@ -73,4 +71,45 @@ void main() {
               await root.delete(recursive: true);
             }
           }, RealHttpOverrides()));
+  test('dispose wakes configuration waiters while network gate is pending',
+      () async {
+    final root = Directory(
+        await (await Directory.systemTemp.createTemp('query-offline-'))
+            .resolveSymbolicLinks());
+    final entered = Completer<void>(), online = Completer<void>();
+    final client = PaywallClient.query(
+        query: PaywallQueryConfiguration(
+            endpoint: Uri.parse('https://example.com/query'),
+            cacheNamespace: 'offline',
+            allowedOrigins: {'https://example.com'},
+            placements: {'entry': 'settings'},
+            waitUntilNetworkAvailable: () {
+              if (!entered.isCompleted) entered.complete();
+              return online.future;
+            },
+            environment: () async => const WebPaywallEnvironment(
+                language: 'en',
+                deviceModel: 'phone',
+                country: 'USA',
+                appVersion: '1')),
+        catalog: () =>
+            PaywallCatalog(productRefs: ['product'], recommendedRef: 'product'),
+        storage: PaywallStorage(directory: () async => root));
+    try {
+      await client.reportAttribution(channel: 'organic');
+      final result = expectLater(
+          client.resolve('settings'), throwsA(PaywallFailure.cancelled));
+      await entered.future;
+      client.dispose();
+      await result;
+      online.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    } finally {
+      client.dispose();
+      if (!online.isCompleted) online.complete();
+      await root.delete(recursive: true);
+    }
+  });
 }
+
+// 等待联网和失败任务由 Client 持有，展示取消不产生第二个配置请求。

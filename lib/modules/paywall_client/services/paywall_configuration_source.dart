@@ -5,6 +5,7 @@ import '../../paywall_renderer/models/paywall_catalog.dart';
 import '../../web_paywall/models/web_paywall_configuration.dart';
 import '../models/paywall_configuration_request.dart';
 import 'paywall_http.dart';
+import '../../web_paywall/services/web_paywall_diagnostics.dart';
 
 /// 独立 SDK 配置来源，网络与离线副本应用相同目录和来源校验。
 class PaywallConfigurationSource {
@@ -36,6 +37,19 @@ class PaywallConfigurationSource {
           ? developmentHTTPOrigin
           : null;
 
+  /// 启动迁移只读取当前确切请求的缓存，来源和商品目录仍重新校验。
+  Future<WebPaywallConfiguration> cached(
+      PaywallConfigurationRequest request) async {
+    _validateRequest(request);
+    final file = await _file(request);
+    if (await file.length() > 1000000)
+      throw const FormatException('Cache too large');
+    return WebPaywallConfiguration.parse(await file.readAsString(),
+        allowedOrigins: allowedOrigins,
+        catalogs: catalogs(),
+        developmentHTTPOrigin: developmentOrigin(request));
+  }
+
   /// 完整校验后才原子写缓存；旧请求失效时既不写入也不读回退。
   Future<WebPaywallConfiguration> load(PaywallConfigurationRequest request,
       {required bool Function() isCurrent}) async {
@@ -47,9 +61,15 @@ class PaywallConfigurationSource {
             catalogs: catalogSnapshot,
             developmentHTTPOrigin: developmentOrigin(request));
     try {
+      WebPaywallDiagnostics.log(
+          request.environment.runtimeEnvironment.name,
+          'configuration.request',
+          '${request.method} ${request.uri} ${request.body ?? ""}');
       final response = await (fetch?.call(request) ??
           PaywallHttp.fetch(request.uri,
               method: request.method, body: request.body));
+      WebPaywallDiagnostics.log(request.environment.runtimeEnvironment.name,
+          'configuration.response', response);
       final raw =
           transform == null ? response : await transform!(response, request);
       _checkCurrent(isCurrent);

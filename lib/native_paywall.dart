@@ -54,3 +54,6 @@ export 'modules/paywall_client/services/paywall_cached_preload.dart';
 
 export 'modules/paywall_client/services/paywall_storekit_product_mapper.dart';
 export 'modules/paywall_client/services/paywall_session_factory.dart';
+
+export 'modules/web_paywall/services/paywall_logging.dart';
+export 'modules/paywall_renderer/services/paywall_store_action_policy.dart';

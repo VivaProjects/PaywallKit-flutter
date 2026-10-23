@@ -5,7 +5,7 @@
 | iOS 能力 | Flutter 实现 | 验证 |
 | --- | --- | --- |
 | 配置来源、GET 参数、POST 查询、请求身份隔离 | PaywallConfigurationSource、PaywallRequestParameters、PaywallClient.query | 配置/缓存测试，真实本地 HTTP 查询 |
-| 归因等待、成功持久化、失败非持久化、变化刷新 | PaywallQueryAttribution、PaywallQueryRuntime | 重启读取、超时、渠道变化测试 |
+| 归因等待、成功持久化、失败非持久化、单次查询 | PaywallQueryAttribution、PaywallQueryRuntime | 重启读取、超时、迟到渠道不刷新测试 |
 | 默认机型/版本/语言/商店国家及更新 | PaywallEnvironmentProvider + 平台插件；Android 商店国家由宿主 Billing 提供 | Dart 运行时与流清理测试；原生设备未验证 |
 | 点位解析、显式禁用、会话策略 | WebPaywallConfiguration、WebPaywallSessionPolicy | 引用、权限、缺失/禁用区别测试 |
 | shared 发布包、实际发布 URL、完整摘要校验 | WebPaywallPackage、WebPaywallPackageLoader | shared 环境绑定与迁移地址测试 |
@@ -25,3 +25,11 @@
 价格、商店权益、恢复与验单始终由宿主交易桥确认。Android 不复制 Apple 的账户管理行为；原生接口与 Widget 测试通过不代表已完成真机购买验收。
 
 移除 GetX 后，完整回归使用普通 MaterialApp；额外覆盖嵌套 Navigator、覆盖路由保留、宿主卸载取消、隐藏准备失败、低层 WebView 与原生渲染器生命周期，并检查 SDK 依赖树不含宿主框架。
+
+## 2026-10-22 同步
+
+参照 iOS 当前工作区（含未提交的日志、ready、延迟商品与展示通知实现），新增覆盖启动快照冻结、逐点位完整资源提交、空结果下次缓存清理、单次失败查询、`conditions.channel`、联网等待、配置等待期限分离、立即展示容器、交易策略、日志模式及热页生命周期。
+
+Flutter 原生长按实现通过 WebView 平台公开接口定位会话 WebView：iOS 使用文档起始脚本、文本交互/链接预览关闭及触摸前原生手势限制；Android 使用长按拦截和页面加载后的 DOM 限制。没有替换 webview_flutter 的导航/界面代理。其实际原生行为尚需真机检查。
+
+协议快照与 iOS 一致；新桥能力已与 web README 中的 deferredProducts 约定核对。兼容旧页，无显式商品请求的 ready 列表为空。未修改 iOS/H5 源码，未发布 SDK 版本。

@@ -5,7 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('SDK dependencies and production imports remain framework independent',
       () {
-    const allowed = {'flutter', 'crypto', 'cryptography', 'webview_flutter'};
+    const allowed = {
+      'flutter',
+      'crypto',
+      'cryptography',
+      'webview_flutter',
+      'webview_flutter_android',
+      'webview_flutter_wkwebview'
+    };
     final manifest = File('pubspec.yaml').readAsStringSync();
     final dependencies =
         manifest.split('\ndependencies:\n')[1].split(RegExp(r'\n\S'))[0];

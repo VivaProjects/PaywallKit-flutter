@@ -4,14 +4,15 @@ part of 'web_paywall_controller.dart';
 extension WebPaywallActions on WebPaywallController {
   /// 只允许已展示且未处理交易的会话调用宿主购买。
   Future<void> _purchase(Object? ref) async {
-    if (!_attached ||
-        !_active ||
-        !ready.value ||
-        _busy ||
+    if (!_attached || !_active || !ready.value || _busy) return;
+    if (!allowsStoreActions ||
         ref is! String ||
         !_products.containsKey(ref) ||
         (sessionPolicy != null &&
-            !sessionPolicy!.purchasableProductRefs.contains(ref))) return;
+            !sessionPolicy!.purchasableProductRefs.contains(ref))) {
+      await _send({'type': 'purchaseResult', 'result': 'failed'});
+      return;
+    }
     trace("action.start", "type=purchase");
     _busy = true;
     try {
@@ -31,6 +32,10 @@ extension WebPaywallActions on WebPaywallController {
   /// 恢复与购买互斥，结果只投递给仍存活的会话。
   Future<void> _restore() async {
     if (!_attached || !_active || !ready.value || _busy) return;
+    if (!allowsStoreActions) {
+      await _send({'type': 'restoreResult', 'result': 'failed'});
+      return;
+    }
     trace("action.start", "type=restore");
     _busy = true;
     try {

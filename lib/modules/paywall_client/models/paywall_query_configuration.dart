@@ -13,6 +13,7 @@ class PaywallQueryConfiguration {
       Future<WebPaywallEnvironment> Function()? environment,
       this.runtimeEnvironment = WebPaywallRuntimeEnvironment.test,
       this.fallback,
+      this.waitUntilNetworkAvailable,
       this.developmentHTTPOrigin,
       Stream<String>? storefrontChanges})
       : environment = environment ??
@@ -23,6 +24,7 @@ class PaywallQueryConfiguration {
         allowedOrigins =
             allowedOrigins == null ? null : Set.unmodifiable(allowedOrigins),
         placements = Map.unmodifiable(placements);
+  final Future<void> Function()? waitUntilNetworkAvailable;
   final Uri endpoint;
   final String cacheNamespace;
   final Set<String>? allowedOrigins;

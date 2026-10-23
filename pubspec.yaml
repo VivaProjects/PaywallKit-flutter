@@ -1,6 +1,6 @@
 name: native_paywall
 description: Native and H5 paywall SDK with host-owned purchases, offline fallback and managed sessions.
-version: 1.0.0
+version: 1.1.0
 publish_to: none
 repository: https://github.com/VivaProjects/PaywallKit-flutter
 environment:
@@ -12,6 +12,9 @@ dependencies:
   crypto: ^3.0.6
   cryptography: ^2.9.0
   webview_flutter: ^4.9.0
+  # 访问当前原生 WebView 的公开实例 ID，用于 SDK 长按策略。
+  webview_flutter_android: ^4.14.1
+  webview_flutter_wkwebview: ^3.26.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

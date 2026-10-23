@@ -6,7 +6,7 @@ import '../../web_paywall/models/web_paywall_configuration.dart';
 import '../../web_paywall/services/web_paywall_package_loader.dart';
 import '../models/paywall_configuration_request.dart';
 
-/// 将业务查询接口转换成两端共用配置，坏页面只影响对应点位。
+/// 查询结果逐包提交，两条下载流水线互不阻塞，坏包只影响关联点位。
 class PaywallQueryResponse {
   PaywallQueryResponse(
       {required Map<String, String> placements,
@@ -22,45 +22,93 @@ class PaywallQueryResponse {
   final String? developmentHTTPOrigin;
   final WebPaywallPackageLoader loader;
 
-  /// 忽略未匹配点位，商品与版本只信任发布包，不接受接口中的商品猜测。
+  /// 信封校验后先通知缺失项，完整包逐个通知，保持原 transform 兼容接口。
   Future<String> transform(
-      String source, PaywallConfigurationRequest request) async {
-    final positions = _positions(source);
-    final mapping = <String, String>{};
-    final modes = <String, String>{};
-    final pages = <String, Map<String, dynamic>>{};
-    final loaded = <String, WebPaywallDocument>{};
-    // 同次响应中相同 URL 只加载一次；独立页面失败不丢弃其他有效点位。
-    for (final position in positions) {
-      if (position is! Map || position['matched'] != true) continue;
-      final placement = placements[position['positionKey']];
-      final address = position['h5Url'];
-      if (placement == null ||
-          mapping.containsKey(placement) ||
-          address is! String) continue;
-      try {
-        final document = loaded[address] ?? await _load(address, request);
-        loaded[address] = document;
-        final existing = pages[document.documentId];
-        if (existing != null && existing['pageUrl'] != address) continue;
-        if (existing == null && pages.length >= 8) continue;
-        mapping[placement] = document.documentId;
-        final mode = position['displayModeKey'];
-        modes[placement] =
-            WebPaywallPresentation.values.any((value) => value.name == mode)
-                ? mode as String
-                : 'fullScreen';
-        pages[document.documentId] = WebPaywallPackage.identity(document);
-      } catch (_) {/* 无效包不成为可展示配置，由宿主入口采用明确兜底。 */}
+    String source,
+    PaywallConfigurationRequest request, {
+    Future<void> Function(String, WebPaywallDocument, WebPaywallPresentation)?
+        onPage,
+    void Function(Set<String>)? onUnavailable,
+    void Function(Set<String>)? onUnmatched,
+    String? Function()? preferredPlacement,
+  }) async {
+    final candidates = _classify(source, onUnavailable, onUnmatched);
+    final batch = _QueryBatch();
+    // 两个 worker 共用 URL Future，同包只下载一次；提交函数负责串行写索引。
+    Future<void> worker() async {
+      while (candidates.isNotEmpty) {
+        final preferred = preferredPlacement?.call();
+        final index = candidates.indexWhere((p) =>
+            preferred != null && placements[p['positionKey']] == preferred);
+        final position = candidates.removeAt(index < 0 ? 0 : index);
+        await _accept(position, request, batch, onPage);
+      }
     }
+
+    await Future.wait([worker(), worker()]);
     return jsonEncode({
       'version': 1,
-      'placements': mapping,
-      'presentations': modes,
-      'paywalls': pages,
+      'placements': batch.mapping,
+      'presentations': batch.modes,
+      'paywalls': batch.pages,
       'preload': [],
       'sessions': {}
     });
+  }
+
+  /// 明确缺失才撤销下次缓存，资源加载失败的候选仍保留旧记录。
+  List<Map> _classify(String source, void Function(Set<String>)? onUnavailable,
+      void Function(Set<String>)? onUnmatched) {
+    final positions = _positions(source).whereType<Map>().toList();
+    final returned = positions
+        .map((p) => placements[p['positionKey']])
+        .whereType<String>()
+        .toSet();
+    final candidates = positions
+        .where((p) => p['matched'] == true && p['h5Url'] is String)
+        .toList();
+    final names = candidates
+        .map((p) => placements[p['positionKey']])
+        .whereType<String>()
+        .toSet();
+    final unmatched = placements.values.toSet().difference(returned);
+    unmatched.addAll(positions
+        .where((p) => p['matched'] == false)
+        .map((p) => placements[p['positionKey']])
+        .whereType<String>());
+    onUnavailable?.call(placements.values.toSet().difference(names));
+    onUnmatched?.call(unmatched.difference(names));
+    return candidates;
+  }
+
+  /// 共享下载结果，拒绝同文档 ID 不同来源冲突，失败保留旧缓存候选。
+  Future<void> _accept(
+      Map position,
+      PaywallConfigurationRequest request,
+      _QueryBatch batch,
+      Future<void> Function(String, WebPaywallDocument, WebPaywallPresentation)?
+          onPage) async {
+    final name = placements[position['positionKey']];
+    final address = position['h5Url'];
+    if (name == null || address is! String || batch.mapping.containsKey(name))
+      return;
+    try {
+      final document = await batch.loaded
+          .putIfAbsent(address, () => _load(address, request));
+      final existing = batch.pages[document.documentId];
+      // 并行下载完成后再次判断，重复点位只能提交一次。
+      if (batch.mapping.containsKey(name) ||
+          existing != null && existing['pageUrl'] != address ||
+          existing == null && batch.pages.length >= 8) return;
+      final mode = WebPaywallPresentation.values
+              .where((v) => v.name == position['displayModeKey'])
+              .firstOrNull ??
+          WebPaywallPresentation.fullScreen;
+      batch.mapping[name] = document.documentId;
+      batch.modes[name] = mode.name;
+      batch.pages[document.documentId] = WebPaywallPackage.identity(document);
+      await onPage?.call(name, document, mode);
+    } catch (_) {/* 单个资源异常不撤销其他已经提交的完整点位。 */}
   }
 
   /// 查询信封限制大小和点位数量，业务错误不能进入配置缓存。
@@ -90,4 +138,12 @@ class PaywallQueryResponse {
                       request.environment.runtimeEnvironment.name == 'test'
                   ? developmentHTTPOrigin
                   : null);
+}
+
+/// 单次响应内部状态，避免并行任务各自覆盖最终配置。
+class _QueryBatch {
+  final mapping = <String, String>{};
+  final modes = <String, String>{};
+  final pages = <String, Map<String, dynamic>>{};
+  final loaded = <String, Future<WebPaywallDocument>>{};
 }

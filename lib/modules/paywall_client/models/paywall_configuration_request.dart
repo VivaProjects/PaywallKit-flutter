@@ -26,8 +26,8 @@ class PaywallConfigurationRequest {
         environment: environment,
         method: 'POST',
         body: jsonEncode({
-          'channelKey': channelKey,
           'conditions': {
+            'channel': channelKey,
             'version': environment.appVersion,
             'device_type': environment.deviceModel,
             'language': environment.language,

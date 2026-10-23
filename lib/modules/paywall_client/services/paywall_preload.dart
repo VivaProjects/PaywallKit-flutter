@@ -37,7 +37,9 @@ class PaywallPreload {
     };
     controller.ready.addListener(_readyListener!);
     controller.failure.addListener(_failureListener!);
-    _deadline = Timer(controller.timeout, cancel);
+    if (!controller.client.usesLaunchSnapshot) {
+      _deadline = Timer(controller.timeout, cancel);
+    }
     unawaited(controller.load());
   }
 

@@ -80,6 +80,28 @@ class WebPaywallResourceCache {
     }
   }
 
+  /// 旧配置迁移仅使用已完整下载的包，缺失时禁止隐式网络请求。
+  Future<WebPaywallResourceLease> cachedPackage(
+      WebPaywallDocument document, String environment) async {
+    final identity = WebPaywallPackage.identity(document);
+    final key = sha256
+        .convert(utf8.encode(jsonEncode([identity, environment])))
+        .toString();
+    final root = await _storageRoot();
+    final directory = Directory('${root.path}/$key');
+    if (_deleting[key] != null) await _deleting[key];
+    _pins[key] = (_pins[key] ?? 0) + 1;
+    try {
+      await verifyDirectory(directory, document, environment);
+      _leases[key] = (_leases[key] ?? 0) + 1;
+      return WebPaywallResourceLease(
+          directory, () => _release(key, environment));
+    } catch (_) {
+      _unpin(key);
+      rethrow;
+    }
+  }
+
   /// 本地包与历史包同样逐文件校验，不能因来自磁盘就跳过摘要检查。
   Future<void> verifyDirectory(Directory directory, WebPaywallDocument document,
           String environment) =>

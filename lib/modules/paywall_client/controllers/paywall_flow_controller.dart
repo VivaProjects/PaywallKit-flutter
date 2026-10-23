@@ -27,7 +27,9 @@ class PaywallFlowController {
       this.presentationOverride,
       this.copy = const PaywallRuntimeCopy(),
       this.timeout = const Duration(seconds: 12)}) {
-    presentation = presentationOverride ?? WebPaywallPresentation.fullScreen;
+    presentation = presentationOverride ??
+        client.cachedPlacement(placement)?.presentation ??
+        WebPaywallPresentation.fullScreen;
     fallback = PaywallFallbackContext(
         client: client, placement: placement, timeout: timeout);
   }
@@ -44,6 +46,7 @@ class PaywallFlowController {
   final WebPaywallPresentation? presentationOverride;
   final PaywallRuntimeCopy copy;
   bool _retainedWeb = false;
+  bool presentationFrozen = false;
   late final PaywallFallbackContext fallback;
   final web = ValueNotifier<WebPaywallController?>(null);
   final failure = ValueNotifier<PaywallFailure?>(null);
@@ -101,9 +104,12 @@ class PaywallFlowController {
     final token = ++_generation;
     try {
       final choice = fallback.selected ??
-          await fallback.resolve().timeout(fallback.remaining);
+          await (client.usesLaunchSnapshot
+              ? fallback.resolve()
+              : fallback.resolve().timeout(fallback.remaining));
+      if (client.usesLaunchSnapshot) fallback.retryDeadline();
       if (!_current(token)) return;
-      if (selected == null) {
+      if (selected == null && !presentationFrozen) {
         presentation = presentationOverride ?? choice.presentation;
       }
       await _activate(choice, token);
@@ -199,6 +205,7 @@ class PaywallFlowController {
       return;
     selected = PaywallPlacement(
         name: value.name,
+        remoteDocument: value.remoteDocument,
         document: value.document,
         environment: value.environment,
         presentation: value.presentation,
@@ -220,7 +227,7 @@ class PaywallFlowController {
     _emit(PaywallSessionEvent(PaywallSessionEventType.resolved,
         placement: choice));
     _emit(PaywallSessionEvent(PaywallSessionEventType.ready,
-        productRefs: web.value!.document.productRefs));
+        productRefs: web.value!.requestedProductRefs));
     if (jsonEncode(web.value!.document.productRefs) ==
         jsonEncode(choice.document.productRefs)) {
       unawaited(client
