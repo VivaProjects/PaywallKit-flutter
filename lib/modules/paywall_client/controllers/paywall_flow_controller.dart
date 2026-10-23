@@ -24,6 +24,7 @@ class PaywallFlowController {
       this.onEvent,
       this.resourceCache,
       this.cacheIdentity = 0,
+      this.refreshProductsAfterReuse = false,
       this.presentationOverride,
       this.copy = const PaywallRuntimeCopy(),
       this.timeout = const Duration(seconds: 12)}) {
@@ -41,6 +42,9 @@ class PaywallFlowController {
   final WebPaywallResourceCache? resourceCache;
   final Duration timeout;
   final Object cacheIdentity;
+
+  /// 允许宿主先展示缓存表面，再校验报价；变化后重建当前页面。
+  final bool refreshProductsAfterReuse;
 
   /// 宿主入口可固定展示方式，配置、离线回退和重试均不能覆盖。
   final WebPaywallPresentation? presentationOverride;
@@ -65,8 +69,8 @@ class PaywallFlowController {
   bool get isUsable => _active && !_closing && failure.value == null;
   bool get allowsDismiss =>
       web.value?.isProcessing != true &&
-      (web.value?.allowsDismiss ??
-          presentation != WebPaywallPresentation.halfSheetLocked);
+      presentation != WebPaywallPresentation.halfSheetLocked &&
+      (web.value?.allowsDismiss ?? true);
   String? get nextPlacement => selected?.sessionPolicy?.nextPlacement;
 
   /// 普通进入开始准备，已预渲染页面直接接管，不重复查询商品。
@@ -138,6 +142,9 @@ class PaywallFlowController {
     final controller =
         client.takeRetainedPage(placement, cacheIdentity, fresh) ?? fresh;
     web.value = controller;
+    if (refreshProductsAfterReuse && !identical(controller, fresh)) {
+      unawaited(_refreshRetainedProducts(controller, token));
+    }
     _deadline?.cancel();
     _deadline = Timer(
         fallback.remaining.isNegative ? Duration.zero : fallback.remaining, () {
@@ -153,6 +160,20 @@ class PaywallFlowController {
     if (_attached) controller.attachPresentation();
   }
 
+  /// 后台结果仅作用于当前展示代次，关闭或切页后丢弃迟到结果。
+  Future<void> _refreshRetainedProducts(
+      WebPaywallController controller, int token) async {
+    final unchanged = await controller.validateRetainedProducts();
+    if (!_current(token) || !identical(web.value, controller)) return;
+    // H5 仅接收首次 bootstrap；报价变化必须重新握手，不能保留旧披露。
+    if (!unchanged) {
+      ready.value = false;
+      web.value = null;
+      controller.destroyPreload();
+      await retry();
+    }
+  }
+
   /// 交易和网页事件仅投递给当前 generation，防止回退后的旧回调干扰新页面。
   WebPaywallController _createWeb(
           PaywallSessionInput input, PaywallPlacement choice, int token) =>
@@ -165,9 +186,13 @@ class PaywallFlowController {
           sessionPolicy: choice.sessionPolicy,
           resourceCache: resourceCache,
           requiresRenderReady: true,
-          allowsDismiss: input.allowsDismiss &&
-              presentation != WebPaywallPresentation.halfSheetLocked,
-          dismiss: close,
+          keepSurfaceAlive: client.residentPlacements
+                  .contains(input.custom['entryPlacement'] ?? placement) &&
+              (presentation == WebPaywallPresentation.fullScreen ||
+                  presentation == WebPaywallPresentation.push),
+          // 锁定半屏只禁止交互式退场，H5 明确关闭仍遵循宿主授权和交易门禁。
+          allowsDismiss: input.allowsDismiss,
+          dismiss: closeFromWeb,
           openLegal: openLegal,
           onRenderReady: () => _rendered(token),
           onResourceSource: (source) => _resourceSource(token, source),
@@ -296,6 +321,18 @@ class PaywallFlowController {
     if (!_current(token) || !_attached) return;
     _emit(PaywallSessionEvent(type, productRef: ref, result: result));
     if (result == PaywallPurchaseResult.succeeded) _exit(type);
+  }
+
+  /// H5 明确关闭不受半屏手势锁限制，但隐藏、交易中和未授权页面不能关闭。
+  void closeFromWeb() {
+    final value = web.value;
+    if (!_attached ||
+        value == null ||
+        !value.allowsDismiss ||
+        value.isProcessing) {
+      return;
+    }
+    close(force: true);
   }
 
   /// 主动关闭仅上报一次，错误页允许退出以避免锁死用户流程。

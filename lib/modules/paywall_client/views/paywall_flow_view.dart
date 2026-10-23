@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import '../../web_paywall/views/web_paywall_surface.dart';
 import '../controllers/paywall_flow_controller.dart';
 
 /// 高层支付墙展示当前候选，失败时原生提供重试与关闭。
@@ -13,8 +13,6 @@ class PaywallFlowView extends StatefulWidget {
 
   /// 默认随视图释放；外部持有者可关闭自动释放并在卸载后自行 dispose。
   final bool disposeController;
-
-  /// 隐藏准备时关闭交互，显示后才允许页面发送购买和关闭动作。
   final bool isPresented;
   @override
   State<PaywallFlowView> createState() => _PaywallFlowViewState();
@@ -22,8 +20,6 @@ class PaywallFlowView extends StatefulWidget {
 
 class _PaywallFlowViewState extends State<PaywallFlowView> {
   PaywallFlowController get controller => widget.controller;
-
-  /// 挂载时按可见状态决定准备网页或正式接管会话。
   @override
   void initState() {
     super.initState();
@@ -79,8 +75,11 @@ class _PaywallFlowViewState extends State<PaywallFlowView> {
                         child: IgnorePointer(
                             ignoring:
                                 !widget.isPresented || !controller.ready.value,
-                            child: WebViewWidget(
-                                key: ObjectKey(web), controller: web.webView))),
+                            child: WebPaywallSurface(
+                                key: ObjectKey(web),
+                                controller: web,
+                                visible: widget.isPresented &&
+                                    controller.ready.value))),
                   if (!controller.ready.value)
                     ColoredBox(
                         color: Theme.of(context).scaffoldBackgroundColor,

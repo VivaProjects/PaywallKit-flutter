@@ -35,6 +35,38 @@ PaywallFlowController flowFor(PaywallClient client, FlowBridge bridge) =>
 void main() {
   setUp(() => WebViewPlatform.instance = FakeWebViewPlatform());
 
+  testWidgets('locked sheet rejects system close but accepts visible H5 close',
+      (tester) async {
+    final client = makeClient();
+    final flow = PaywallFlowController(
+        client: client,
+        placement: 'banner',
+        presentationOverride: WebPaywallPresentation.halfSheetLocked,
+        openLegal: (_) {},
+        resourceCache: WebPaywallResourceCache(
+            directory: () async => throw StateError('remote')),
+        prepare: (doc) async => PaywallSessionInput(
+            document: doc, purchaseBridge: FlowBridge(), environment: env));
+    PaywallSessionEventType? exit;
+    flow.onExit = (result) => exit = result;
+    await tester
+        .pumpWidget(MaterialApp(home: PaywallFlowView(controller: flow)));
+    await frames(tester);
+    final web = (WebViewPlatform.instance as FakeWebViewPlatform).controller;
+    await render(tester, web);
+    flow.close();
+    expect(exit, isNull);
+    flow.detach();
+    flow.closeFromWeb();
+    expect(exit, isNull);
+    flow.attach();
+    web.receive({'type': 'close'});
+    await tester.pump();
+    expect(exit, PaywallSessionEventType.closed);
+    await tester.pumpWidget(const SizedBox());
+    client.dispose();
+  });
+
   testWidgets('native back and push override survive an observer error',
       (tester) async {
     final client = makeClient();

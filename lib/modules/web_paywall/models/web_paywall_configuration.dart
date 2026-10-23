@@ -7,6 +7,8 @@ enum WebPaywallPresentation { fullScreen, halfSheet, halfSheetLocked, push }
 
 /// 与 iOS 使用相同的配置快照，完整验证后才向点位入口开放。
 class WebPaywallConfiguration {
+  /// 查询转换与配置解析共用有界页面上限，支持多点位独立绑定。
+  static const maxPages = 16;
   WebPaywallConfiguration._(this.placements, this.documents, this.presentations,
       this.sessions, this.disabledPlacements, this.preloadIds, this.source);
   final String source;
@@ -68,7 +70,8 @@ class WebPaywallConfiguration {
       Set<String>? allowedOrigins,
       String? developmentHTTPOrigin) {
     final payloads = Map<String, dynamic>.from(payload);
-    if (payloads.length > 8) throw const FormatException('Too many pages');
+    if (payloads.length > maxPages)
+      throw const FormatException('Too many pages');
     final documents = <String, WebPaywallDocument>{};
     for (final entry in payloads.entries) {
       final data = Map<String, dynamic>.from(entry.value as Map);

@@ -216,7 +216,19 @@ extension WebPaywallProtocol on WebPaywallController {
         ...custom,
         ...environment.toPayload()
       },
+      'allowsStoreActions': allowsStoreActions,
       'products': visible
+    });
+    await _sendPresentationState();
+  }
+
+  /// 首屏握手后同步真实可见状态，缓存页隐藏时由 H5 重置临时选择。
+  Future<void> _sendPresentationState() async {
+    if (!_active || !_bootstrapSent) return;
+    await _send({
+      'type': 'presentationState',
+      'sessionID': _sessionID,
+      'visible': _attached
     });
   }
 

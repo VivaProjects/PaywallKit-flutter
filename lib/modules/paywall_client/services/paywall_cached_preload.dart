@@ -30,6 +30,15 @@ class PaywallCachedPreload {
 
   /// 先完成成功版本记录，再把网页留给后续展示，不发送主动关闭事件。
   Future<void> _park(PaywallFlowController flow, int generation) async {
+    // JS 首屏回执可能早于 bootstrap 调用返回；等待商品门禁解除再接管。
+    final deadline = DateTime.now().add(flow.timeout);
+    while (generation == _generation &&
+        flow.isUsable &&
+        flow.web.value?.awaitingProducts == true &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (generation != _generation) return;
     await flow.parkInCache(() => generation == _generation);
     if (generation != _generation) return;
     if (_ready != null) _flow?.ready.removeListener(_ready!);

@@ -30,7 +30,19 @@ class PaywallFallbackContext {
   Future<PaywallPlacement> resolve() async {
     await store?.initialize();
     _checkDisabled();
-    if (local) return _local();
+    if (local) {
+      await client.restoreQuery();
+      final launch = client.queryRestore == null
+          ? null
+          : client.cachedPlacement(placement);
+      if (launch != null) {
+        // 固定启动版本出错后仍允许退回内置包。
+        current = selected = launch;
+        local = false;
+        return launch;
+      }
+      return _local();
+    }
     final value = await client.resolve(placement);
     store = client.localPackages;
     await store?.initialize();
@@ -48,7 +60,8 @@ class PaywallFallbackContext {
         store == null) return null;
     reason ??= failure;
     if (!local) {
-      if (!store!.fallbackPlacements.contains(placement)) return null;
+      if (store!.placement != placement &&
+          !store!.fallbackPlacements.contains(placement)) return null;
       if (usesHistory && !triedPrevious && current != null) {
         triedPrevious = true;
         try {
@@ -63,10 +76,7 @@ class PaywallFallbackContext {
       }
       local = true;
     } else {
-      if (bundledOnly ||
-          selected?.source != 'update' &&
-              !(client.usesLaunchSnapshot && selected?.source == 'disk'))
-        return null;
+      if (bundledOnly || selected?.source != 'update') return null;
       bundledOnly = true;
     }
     retryDeadline();
@@ -76,11 +86,23 @@ class PaywallFallbackContext {
   /// 本地包整体替换页面商品绑定，同时保留真实入口用于 H5 与日志。
   Future<PaywallPlacement> _local() async {
     _checkDisabled();
-    if (!bundledOnly && client.queryFallbackAtLaunch != null) {
-      final cached = await client.queryFallbackAtLaunch!();
-      if (cached != null) return selected = _withReason(cached);
+    await client.restoreQuery();
+    final launch = client.queryLaunchFallback?.call(store!.placement);
+    // 同一个启动包已经失败时直接退内置，禁止在回退链中重复选择。
+    if (!bundledOnly &&
+        launch != null &&
+        selected?.document != launch.document) {
+      return selected = PaywallPlacement(
+          name: placement,
+          document: launch.document,
+          environment: launch.environment.forPlacement(placement),
+          presentation: launch.presentation,
+          clientIdentity: client.identity,
+          source: 'update',
+          fallbackReason: reason?.name);
     }
-    final value = await store!.selection(bundledOnly: bundledOnly);
+    final value = await store!.selection(
+        bundledOnly: client.queryRestore == null ? bundledOnly : true);
     final environment = await client.currentEnvironment();
     if (environment.runtimeEnvironment.name != store!.archive.environment)
       throw PaywallFailure.configuration;

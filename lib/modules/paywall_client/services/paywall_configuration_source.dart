@@ -37,6 +37,15 @@ class PaywallConfigurationSource {
           ? developmentHTTPOrigin
           : null;
 
+  /// 查询运行时复用来源约束，不能绕过 HTTPS 与开发地址检查。
+  void validateRequest(PaywallConfigurationRequest request) =>
+      _validateRequest(request);
+
+  /// 兼容合并版本的缓存读取入口，仍使用原有身份和校验。
+  Future<WebPaywallConfiguration> readCached(
+          PaywallConfigurationRequest request) =>
+      cached(request);
+
   /// 启动迁移只读取当前确切请求的缓存，来源和商品目录仍重新校验。
   Future<WebPaywallConfiguration> cached(
       PaywallConfigurationRequest request) async {

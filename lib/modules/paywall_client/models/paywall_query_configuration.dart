@@ -1,4 +1,6 @@
 import '../services/paywall_environment_provider.dart';
+import 'paywall_configuration_request.dart';
+import '../../web_paywall/services/web_paywall_package_loader.dart';
 import '../../web_paywall/models/web_paywall_environment.dart';
 import '../../web_paywall/models/web_paywall_runtime_environment.dart';
 import 'paywall_query_fallback.dart';
@@ -13,8 +15,12 @@ class PaywallQueryConfiguration {
       Future<WebPaywallEnvironment> Function()? environment,
       this.runtimeEnvironment = WebPaywallRuntimeEnvironment.test,
       this.fallback,
-      this.waitUntilNetworkAvailable,
       this.developmentHTTPOrigin,
+      this.waitUntilNetworkAvailable,
+      this.waitUntilNetworkAvailableCancellable,
+      this.fetch,
+      this.packageLoader,
+      this.legacyCacheNamespaces = const [],
       Stream<String>? storefrontChanges})
       : environment = environment ??
             (() => PaywallEnvironmentProvider.capture(
@@ -24,7 +30,18 @@ class PaywallQueryConfiguration {
         allowedOrigins =
             allowedOrigins == null ? null : Set.unmodifiable(allowedOrigins),
         placements = Map.unmodifiable(placements);
+
+  /// 网络等待由宿主实现，取消信号在最后一个共享 Client 释放时完成。
+  final Future<void> Function(Future<void> cancelled)?
+      waitUntilNetworkAvailableCancellable;
+
+  /// 兼容已有宿主；同时配置时优先使用可取消回调。
   final Future<void> Function()? waitUntilNetworkAvailable;
+  final List<String> legacyCacheNamespaces;
+
+  /// 可注入传输和完整包加载器，便于离线验证协议及启动缓存。
+  final Future<String> Function(PaywallConfigurationRequest)? fetch;
+  final WebPaywallPackageLoader? packageLoader;
   final Uri endpoint;
   final String cacheNamespace;
   final Set<String>? allowedOrigins;

@@ -51,3 +51,5 @@ Flutter 高层配置查询、点位解析与会话接入见 [Flutter Client](doc
 SDK 不依赖宿主状态管理、路由或依赖注入框架，可在普通 MaterialApp 中使用。1.0.0 的无 GetX API 与 0.2.0 不兼容，升级说明见 [框架独立性与迁移](docs/FRAMEWORK_INDEPENDENCE.md)。
 
 1.1.0 新增启动快照与单次查询、延迟商品加载、日志开关和展示通知；行为迁移与新增接口见 [Flutter Client](docs/FLUTTER_CLIENT.md#本次同步新增接口与行为)。WebView 平台插件需满足当前直接依赖的最低版本要求。
+
+1.3.0 的 Android 缓存、共享查询和旧快照迁移说明见 [合并与接入说明](docs/ANDROID_MERGE_1_3.md)。

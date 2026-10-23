@@ -22,20 +22,37 @@ class PaywallClient {
       {required this.configuration, Set<String> retainedPlacements = const {}})
       : retainedPlacements = Set.unmodifiable(retainedPlacements);
 
-  /// 查询式入口内置归因、前台刷新和本地包更新。
+  /// 查询式入口共用启动任务，冻结当前版本并持久化下次启动更新。
   factory PaywallClient.query(
           {required PaywallQueryConfiguration query,
           required PaywallCatalog Function() catalog,
           PaywallStorage? storage,
           Set<String> retainedPlacements = const {}}) =>
-      PaywallQueryRuntime(
-              configuration: query,
-              catalog: catalog,
-              storage: storage,
-              retainedPlacements: retainedPlacements)
-          .client;
+      PaywallQueryRuntime.connect(
+          configuration: query,
+          catalog: catalog,
+          storage: storage,
+          retainedPlacements: retainedPlacements);
 
   Future<void> Function({String? channel, bool failed})? attributionReporter;
+
+  /// 查询快照准备独立于商品和首屏计时，保留共享运行时实现。
+  bool get usesLaunchSnapshot => queryResolve != null;
+
+  Future<void> Function()? queryPrepare, queryRestore, queryUpdate;
+  Set<String> queryPlacementNames = {};
+  Future<PaywallPlacement?> Function(String)? queryResolve;
+  PaywallPlacement? Function(String)? queryCached, queryLaunchFallback;
+
+  /// 等待本次启动更新结束，诊断调用不会绕过唯一请求约束。
+  Future<void> waitForQueryUpdate() async {
+    await queryUpdate?.call();
+  }
+
+  /// 本地入口只恢复磁盘快照，不等待联网。
+  Future<void> restoreQuery() async {
+    await queryRestore?.call();
+  }
 
   /// 宿主仅转交归因 SDK 的结果，等待和持久化由 SDK 管理。
   Future<void> reportAttribution({String? channel, bool failed = false}) async {
@@ -43,14 +60,11 @@ class PaywallClient {
   }
 
   final PaywallConfigurationSource configuration;
-  Future<PaywallPlacement?> Function(String)? queryResolver;
-  PaywallPlacement? Function(String)? queryCachedPlacement;
-  Future<void> Function()? queryPrepare;
-  Future<PaywallPlacement?> Function()? queryFallbackAtLaunch;
-  Future<WebPaywallConfiguration> Function()? queryRefresh;
-  bool get usesLaunchSnapshot => queryResolver != null;
   final Object identity = Object();
   final Set<String> retainedPlacements;
+
+  /// 宿主显式选择 Android 常驻表面的入口；仍受会话身份与缓存资格约束。
+  Set<String> residentPlacements = const {};
   final _pages =
       <String, ({Object identity, WebPaywallController controller})>{};
 
@@ -61,11 +75,17 @@ class PaywallClient {
 
   /// 只有已就绪且没有交易进行中的页面才允许跨展示保留。
   bool retainPage(String placement, Object identity, WebPaywallController web) {
-    if (!retainedPlacements.contains(placement) || !web.canRetain || _disposed)
+    if (!retainedPlacements.contains(placement) ||
+        !web.canRetain ||
+        _disposed) {
+      web.trace('cache.retain_rejected',
+          'enabled=${retainedPlacements.contains(placement)} reusable=${web.isReusable} ready=${web.ready.value} products=${web.awaitingProducts} busy=${web.isProcessing} disposed=$_disposed');
       return false;
+    }
     invalidatePage(placement);
     web.detachPresentation();
     _pages[placement] = (identity: identity, controller: web);
+    web.trace('cache.retained');
     return true;
   }
 
@@ -88,7 +108,7 @@ class PaywallClient {
 
   /// 同步读取当前配置，重复入口无需等待新的网络结果。
   PaywallPlacement? cachedPlacement(String placement) {
-    if (queryCachedPlacement != null) return queryCachedPlacement!(placement);
+    if (queryCached != null) return queryCached!(placement);
     final config = _cached;
     final request = _request;
     if (config == null || request == null || isPlacementDisabled(placement))
@@ -208,7 +228,10 @@ class PaywallClient {
 
   /// 相同请求共用配置；环境、归因或请求条件变化时清除旧快照。
   Future<WebPaywallConfiguration> refresh({bool force = true}) async {
-    if (queryRefresh != null) return queryRefresh!();
+    if (queryPrepare != null) {
+      await queryPrepare!();
+      return _queryConfiguration();
+    }
     final epoch = _epoch;
     final sequence = ++_requestSequence;
     final request = await configuration.request();
@@ -237,9 +260,40 @@ class PaywallClient {
     }
   }
 
+  /// 查询入口导出当前冻结配置，显式 refresh 也不能额外发送网络请求。
+  WebPaywallConfiguration _queryConfiguration() {
+    final values = <String, dynamic>{};
+    final mapping = <String, String>{};
+    final modes = <String, String>{};
+    for (final name in queryPlacementNames) {
+      final value = cachedPlacement(name);
+      if (value == null) continue;
+      final identity = WebPaywallPackage.identity(value.document);
+      final previous = values[value.document.documentId];
+      if (previous != null && jsonEncode(previous) != jsonEncode(identity)) {
+        throw StateError('Mixed launch revisions; use resolve(placement)');
+      }
+      mapping[name] = value.document.documentId;
+      modes[name] = value.presentation.name;
+      values[value.document.documentId] =
+          WebPaywallPackage.identity(value.document);
+    }
+    return WebPaywallConfiguration.parse(
+        jsonEncode({
+          'version': 1,
+          'placements': mapping,
+          'presentations': modes,
+          'paywalls': values,
+          'preload': []
+        }),
+        allowedOrigins: configuration.allowedOrigins,
+        catalogs: configuration.catalogs(),
+        developmentHTTPOrigin: configuration.developmentHTTPOrigin);
+  }
+
   /// 缺失点位返回空值，显式禁用独立报错；失效旧请求不会取消新的展示等待者。
   Future<PaywallPlacement?> resolve(String placement) async {
-    if (queryResolver != null) return queryResolver!(placement);
+    if (queryResolve != null) return queryResolve!(placement);
     while (!_disposed) {
       final epoch = _epoch;
       try {

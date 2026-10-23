@@ -80,18 +80,18 @@ class WebPaywallResourceCache {
     }
   }
 
-  /// 旧配置迁移仅使用已完整下载的包，缺失时禁止隐式网络请求。
-  Future<WebPaywallResourceLease> cachedPackage(
+  /// 旧缓存迁移只读取完整磁盘包，不允许隐式下载。
+  Future<WebPaywallResourceLease> cached(
       WebPaywallDocument document, String environment) async {
     final identity = WebPaywallPackage.identity(document);
     final key = sha256
         .convert(utf8.encode(jsonEncode([identity, environment])))
         .toString();
-    final root = await _storageRoot();
-    final directory = Directory('${root.path}/$key');
     if (_deleting[key] != null) await _deleting[key];
     _pins[key] = (_pins[key] ?? 0) + 1;
     try {
+      final root = await _storageRoot();
+      final directory = Directory('${root.path}/$key');
       await verifyDirectory(directory, document, environment);
       _leases[key] = (_leases[key] ?? 0) + 1;
       return WebPaywallResourceLease(
@@ -163,10 +163,11 @@ class WebPaywallResourceCache {
           .setLastModified(DateTime.now());
       WebPaywallDiagnostics.log(environment, "resource.hit", "key=$key");
       return directory;
-    } catch (_) {
+    } catch (error) {
       WebPaywallDiagnostics.log(environment, "resource.miss", "key=$key");
       if (await directory.exists()) {
-        WebPaywallDiagnostics.log(environment, "resource.invalid", "key=$key");
+        WebPaywallDiagnostics.log(
+            environment, "resource.invalid", "key=$key error=$error");
         if ((_leases[key] ?? 0) > 0) rethrow;
         await directory.delete(recursive: true);
       }
@@ -250,7 +251,7 @@ class WebPaywallResourceCache {
             await _fetch(base.resolve(asset['path']), asset['size'], deadline);
         if (data.length != asset['size'] ||
             sha256.convert(data).toString() != asset['sha256']) {
-          throw const FormatException('Resource hash mismatch');
+          throw FormatException('Resource hash mismatch: ${asset['path']}');
         }
         final file = File('${temporary.path}/${asset['path']}');
         await file.parent.create(recursive: true);
@@ -277,7 +278,8 @@ class WebPaywallResourceCache {
     }
     final length = await file.length();
     if (length > size || (exact && length != size))
-      throw const FormatException('Invalid resource size');
+      throw FormatException(
+          'Invalid resource size: ${file.path} expected=$size actual=$length');
     return file.readAsBytes();
   }
 
@@ -292,7 +294,7 @@ class WebPaywallResourceCache {
       final data = await _readFile(
           File('${directory.path}/${asset['path']}'), asset['size']);
       if (sha256.convert(data).toString() != asset['sha256'])
-        throw const FormatException('Corrupt resource');
+        throw FormatException('Corrupt resource: ${asset['path']}');
     }
   }
 

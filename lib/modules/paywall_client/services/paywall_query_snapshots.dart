@@ -1,189 +1,265 @@
-part of 'paywall_query_runtime.dart';
+import 'dart:io';
+import 'dart:convert';
+import '../models/paywall_configuration_request.dart';
+import 'paywall_query_response.dart';
+import '../../paywall_renderer/models/paywall_catalog.dart';
+import '../../web_paywall/models/web_paywall_configuration.dart';
+import '../../web_paywall/models/web_paywall_environment.dart';
+import '../../web_paywall/models/web_paywall_package.dart';
+import '../models/paywall_placement.dart';
+import '../models/paywall_query_configuration.dart';
+import 'paywall_package_archive.dart';
+import 'paywall_storage.dart';
 
-/// 启动快照恢复、持久化及历史迁移与网络任务调度分离。
-extension PaywallQuerySnapshots on PaywallQueryRuntime {
-  /// 环境、端点、版本及稳定适配条件隔离；国家和渠道保留在原请求中。
-  Future<void> _restore() async {
-    final env = await _environment();
+/// 点位索引只指向已归档完整包，与普通资源 LRU 隔离。
+class PaywallQuerySnapshots {
+  PaywallQuerySnapshots(this.configuration, this.catalog, this.storage,
+      {bool Function()? isCurrent})
+      : _isCurrent = isCurrent ?? (() => true);
+  final bool Function() _isCurrent;
+  final PaywallQueryConfiguration configuration;
+  final PaywallCatalog Function() catalog;
+  final PaywallStorage storage;
+  late final PaywallPackageArchive archive;
+  late WebPaywallEnvironment _environment;
+  Future<void>? _initializing;
+
+  /// 当前设备适配参数与端点共同隔离磁盘缓存，保留旧格式的迁移入口。
+  Future<void> _initialize() async {
+    _environment = await configuration.environment();
+    if (_environment.runtimeEnvironment != configuration.runtimeEnvironment) {
+      throw const FormatException('Wrong snapshot environment');
+    }
     final scope = jsonEncode([
       configuration.cacheScope,
       configuration.endpoint.toString(),
-      env.appVersion,
-      env.deviceModel,
-      env.language
+      _environment.appVersion,
+      _environment.deviceModel,
+      _environment.language,
+      _environment.os,
+      _environment.isPad,
     ]);
-    final root = await storage.folder('query_snapshots', scope);
-    _archive = _makeArchive(() async => root);
-    _index = File('${root.path}/index.json');
-    _hasIndex = await _index.exists();
+    archive = _archiveFor(scope);
+  }
+
+  /// 迁移读取使用相同来源约束，不允许缓存扩大宿主目录授权。
+  PaywallPackageArchive _archiveFor(String scope) => PaywallPackageArchive(
+        directory: () => storage.folder('query_snapshots', scope),
+        environment: configuration.runtimeEnvironment.name,
+        catalog: catalog,
+        allowedOrigins: configuration.allowedOrigins,
+        developmentHTTPOrigin: configuration.developmentHTTPOrigin,
+      );
+  final Map<String, dynamic> _records = {};
+  Future<void> _serial = Future.value();
+  bool hasIndex = false;
+
+  /// 每个点位分别复验来源、目录、环境和文件摘要，损坏项不影响其他入口。
+  Future<Map<String, PaywallPlacement>> restore() async {
+    await (_initializing ??= _initialize());
+    final result = <String, PaywallPlacement>{};
+    if (!await (await _file()).exists()) await _migrateSnapshots();
     try {
-      final saved = await PaywallStorage.read(_index);
-      if (saved['version'] != 1 || saved['records'] is! Map) return;
-      final records = Map<String, dynamic>.from(saved['records'] as Map);
-      if (records.length > 100) return;
+      final data = await PaywallStorage.read(await _file());
+      if (data['version'] != 1 ||
+          data['environment'] != configuration.runtimeEnvironment.name)
+        return result;
+      final records = Map<String, dynamic>.from(data['placements'] as Map);
+      if (records.length > configuration.placements.length) return result;
       _records.addAll(records);
-      for (final name in records.keys) {
-        if (!configuration.placements.values.contains(name)) continue;
-        await _restoreRecord(name, records[name], env);
-      }
-    } catch (_) {/* 无索引时由唯一后台查询补齐。 */}
-    _launchFallback = _active[configuration.fallback?.placement];
-    await _prune();
-  }
-
-  /// 各点位独立复验完整资源，单点损坏不影响其他启动版本。
-  Future<void> _restoreRecord(
-      String name, Object? raw, WebPaywallEnvironment env) async {
-    try {
-      final record = Map<String, dynamic>.from(raw as Map);
-      _validateRecord(record);
-      final doc = await _archive
-          .open(Map<String, dynamic>.from(record['document'] as Map));
-      _checkActive();
-      _leases.add(WebPaywallResourceLease(doc.localDirectory!, () {}));
-      _activeRecords[name] = record;
-      _active[name] = PaywallPlacement(
-          name: name,
-          document: doc,
-          environment: env.forPlacement(name),
-          presentation: WebPaywallPresentation.values
-              .byName(record['presentation'] as String),
-          requestIdentity: record['requestIdentity'] as String,
-          clientIdentity: client.identity,
-          source: 'disk',
-          remoteDocument: _archive
-              .document(Map<String, dynamic>.from(record['document'] as Map)),
-          configurationSnapshot: _recordConfiguration(name, record));
-    } catch (_) {/* 单个坏包不影响其他启动点位。 */}
-  }
-
-  /// 旧缓存只迁移确切请求身份与完整磁盘资源，不能靠下载伪造启动缓存。
-  Future<void> _migrateLegacy(PaywallConfigurationRequest request) async {
-    if (_hasIndex) return;
-    try {
-      final old = await client.configuration.cached(request);
-      for (final name in old.placements.keys) {
-        if (!configuration.placements.values.contains(name)) continue;
-        final document = old.documentForPlacement(name);
-        if (document == null) continue;
-        try {
-          final lease = await response.loader.resourceCache
-              .cachedPackage(document, configuration.runtimeEnvironment.name);
-          try {
-            await _accept(name, document.withLocalDirectory(lease.directory),
-                old.presentations[name]!, request);
-          } finally {
-            lease.release();
-          }
-        } catch (_) {/* 不完整旧包继续等待后台查询。 */}
-      }
-    } catch (_) {/* 没有确切请求缓存时不从其他请求迁移。 */}
-  }
-
-  /// 恢复原请求身份以防索引串用，价格与权益不进入持久记录。
-  void _validateRecord(Map<String, dynamic> record) {
-    final env = Map<String, dynamic>.from(record['environment'] as Map);
-    final request = PaywallConfigurationRequest(
-        uri: configuration.endpoint,
-        method: 'POST',
-        body: record['requestBody'] as String,
-        environment: WebPaywallEnvironment(
-            os: env['os'] as String?,
-            isPad: env['isPad'] as bool? ?? false,
-            language: env['language'] as String,
-            deviceModel: env['deviceModel'] as String,
-            country: env['country'] as String,
-            appVersion: env['appVersion'] as String,
-            runtimeEnvironment: configuration.runtimeEnvironment));
-    if (env['runtimeEnvironment'] != configuration.runtimeEnvironment.name ||
-        request.identity(configuration.cacheScope) !=
-            record['requestIdentity']) {
-      throw const FormatException('Invalid snapshot request identity');
+      hasIndex = true;
+    } catch (_) {
+      return result;
     }
+    for (final entry in _records.entries) {
+      if (!configuration.placements.containsValue(entry.key)) continue;
+      try {
+        result[entry.key] = await _open(
+            entry.key, Map<String, dynamic>.from(entry.value as Map));
+      } catch (_) {/* 单个损坏快照等待后台补齐。 */}
+    }
+    return result;
   }
 
-  /// 保留通用 refresh 返回类型，查询式入口仍只触发一次后台任务。
-  Future<WebPaywallConfiguration> refresh() async {
-    await prepare();
-    final pages = <String, dynamic>{};
-    final placements = <String, String>{};
-    final modes = <String, String>{};
-    for (final entry in _activeRecords.entries) {
-      final record = entry.value as Map;
-      final document = record['document'] as Map;
-      final id = document['documentId'] as String;
-      if (pages.containsKey(id) &&
-          jsonEncode(pages[id]) != jsonEncode(document)) {
-        throw StateError(
-            'Mixed launch revisions; use resolve(placement) for per-placement snapshots');
-      }
-      pages[id] = document;
-      placements[entry.key] = id;
-      modes[entry.key] = record['presentation'] as String;
-    }
-    return WebPaywallConfiguration.parse(
-        jsonEncode({
-          'version': 1,
-          'placements': placements,
-          'presentations': modes,
-          'paywalls': pages,
-          'preload': [],
-          'sessions': {}
-        }),
+  /// 原始配置重新解析，索引不能扩大当前宿主允许的商品目录。
+  Future<PaywallPlacement> _open(
+      String name, Map<String, dynamic> record) async {
+    final parsed = WebPaywallConfiguration.parse(
+        record['configuration'] as String,
         allowedOrigins: configuration.allowedOrigins,
         catalogs: {'default': catalog()},
         developmentHTTPOrigin: configuration.developmentHTTPOrigin);
+    final document = parsed.documentForPlacement(name);
+    if (document == null)
+      throw const FormatException('Missing snapshot placement');
+    final local = await archive.open(WebPaywallPackage.identity(document));
+    final env = Map<String, dynamic>.from(record['environment'] as Map);
+    if (env['runtimeEnvironment'] != configuration.runtimeEnvironment.name)
+      throw const FormatException('Wrong environment');
+    return PaywallPlacement(
+        name: name,
+        document: local,
+        remoteDocument: document,
+        environment: _environment.forPlacement(name),
+        presentation: parsed.presentations[name]!,
+        sessionPolicy: parsed.sessions[name],
+        requestIdentity: record['requestIdentity'] as String,
+        configurationSnapshot: parsed.source,
+        source: 'launch_snapshot');
   }
 
-  /// 索引原子替换，资源目录与当前已持有会话独立保留。
-  Future<void> _save() {
-    // 固定本次索引内容，再串行提交，防止两个完成包的写入乱序。
-    final snapshot =
-        jsonDecode(jsonEncode({'version': 1, 'records': _records}));
-    final task = _saving.then((_) =>
-        PaywallStorage.write(_index, snapshot, isCurrent: () => !_disposed));
-    _saving = task.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+  /// 旧独立 SDK 和 Android 快照只迁移当前环境的完整包，不触发网络。
+  Future<void> _migrateSnapshots() async {
+    final scopes = [
+      jsonEncode([
+        configuration.cacheScope,
+        configuration.endpoint.toString(),
+        _environment.appVersion,
+        _environment.deviceModel,
+        _environment.language,
+      ]),
+      configuration.cacheScope
+    ];
+    for (final scope in scopes) {
+      final oldArchive = _archiveFor(scope);
+      try {
+        final data = await PaywallStorage.read(
+            File('${(await oldArchive.directory()).path}/index.json'));
+        if (!_isCurrent()) return;
+        if (data['version'] != 1) continue;
+        final records = data['records'] ?? data['placements'];
+        if (records is! Map || records.length > 100) continue;
+        for (final entry in records.entries) {
+          if (!_isCurrent()) return;
+          if (!configuration.placements.containsValue(entry.key) ||
+              _records.containsKey(entry.key)) continue;
+          try {
+            await _migrateRecord(entry.key as String,
+                Map<String, dynamic>.from(entry.value as Map), oldArchive);
+          } catch (_) {/* 损坏或不匹配的旧包不迁移。 */}
+        }
+      } catch (_) {/* 旧版本未生成缓存时由后台查询补齐。 */}
+    }
+  }
+
+  /// 比较稳定适配条件并重新校验完整资源，迁移后使用当前环境字段。
+  Future<void> _migrateRecord(String name, Map<String, dynamic> record,
+      PaywallPackageArchive oldArchive) async {
+    final env = Map<String, dynamic>.from(record['environment'] as Map);
+    final current = _environment.toPayload();
+    for (final key in [
+      'runtimeEnvironment',
+      'appVersion',
+      'deviceModel',
+      'language'
+    ]) {
+      if (env[key] != current[key]) return;
+    }
+    for (final key in ['os', 'isPad']) {
+      if (env.containsKey(key) && env[key] != current[key]) return;
+    }
+    String raw;
+    if (record['configuration'] is String) {
+      raw = record['configuration'] as String;
+    } else {
+      final request = PaywallConfigurationRequest(
+          uri: configuration.endpoint,
+          method: 'POST',
+          body: record['requestBody'] as String,
+          environment: WebPaywallEnvironment(
+              os: env['os'] as String?,
+              isPad: env['isPad'] as bool? ?? false,
+              language: env['language'] as String,
+              deviceModel: env['deviceModel'] as String,
+              country: env['country'] as String,
+              appVersion: env['appVersion'] as String,
+              runtimeEnvironment: configuration.runtimeEnvironment));
+      if (request.identity(configuration.cacheScope) !=
+          record['requestIdentity']) return;
+      final doc = oldArchive
+          .document(Map<String, dynamic>.from(record['document'] as Map));
+      raw = PaywallQueryResponse.configurationFor(
+          name, doc, record['presentation'] as String);
+    }
+    final parsed = WebPaywallConfiguration.parse(raw,
+        allowedOrigins: configuration.allowedOrigins,
+        catalogs: {'default': catalog()},
+        developmentHTTPOrigin: configuration.developmentHTTPOrigin);
+    final doc = parsed.documentForPlacement(name);
+    if (doc == null) return;
+    final local = await oldArchive.open(WebPaywallPackage.identity(doc));
+    await save(
+        PaywallPlacement(
+            name: name,
+            document: local,
+            environment: _environment.forPlacement(name),
+            presentation: parsed.presentations[name]!,
+            sessionPolicy: parsed.sessions[name],
+            requestIdentity: record['requestIdentity'] as String,
+            configurationSnapshot: raw),
+        _isCurrent);
+  }
+
+  /// 下载与摘要验证成功后串行提交索引；失败不会先清除旧版本。
+  Future<PaywallPlacement> save(
+      PaywallPlacement value, bool Function() isCurrent) async {
+    final local = await archive.archive(value.document, isCurrent: isCurrent);
+    await _enqueue(() async {
+      final records = {
+        ..._records,
+        value.name: {
+          'configuration': value.configurationSnapshot,
+          'requestIdentity': value.requestIdentity,
+          'environment': value.environment.toPayload(),
+        }
+      };
+      await _commit(records, isCurrent);
+    });
+    return PaywallPlacement(
+        name: value.name,
+        document: local,
+        remoteDocument: value.remoteDocument ?? value.document,
+        environment: value.environment,
+        presentation: value.presentation,
+        sessionPolicy: value.sessionPolicy,
+        requestIdentity: value.requestIdentity,
+        configurationSnapshot: value.configurationSnapshot,
+        source: 'query_snapshot');
+  }
+
+  /// 只有合法响应的明确未命中集合才删除下次启动指针。
+  Future<void> remove(Set<String> unmatched, bool Function() isCurrent) =>
+      _enqueue(() async {
+        final records = {..._records}
+          ..removeWhere((key, _) => unmatched.contains(key));
+        await _commit(records, isCurrent);
+      });
+
+  /// 完整索引原子替换后再更新内存，磁盘失败保留原指针。
+  Future<void> _commit(
+      Map<String, dynamic> records, bool Function() isCurrent) async {
+    await PaywallStorage.write(
+        await _file(),
+        {
+          'version': 1,
+          'environment': configuration.runtimeEnvironment.name,
+          'placements': records
+        },
+        isCurrent: isCurrent);
+    _records
+      ..clear()
+      ..addAll(records);
+    hasIndex = true;
+  }
+
+  /// 同时完成的下载不会互相覆盖索引。
+  Future<void> _enqueue(Future<void> Function() action) {
+    final task = _serial.then((_) => action());
+    _serial = task.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return task;
   }
 
-  /// 冷启动快照兜底不等待网络，也不采用本次后台才新增的版本。
-  Future<PaywallPlacement?> fallbackAtLaunch() async {
-    await (_initializing ??= _restore());
-    _checkActive();
-    return _launchFallback;
-  }
-
-  /// 单点位配置保存原始发布身份，供成功版本归档和历史复验使用。
-  String _recordConfiguration(String name, Map record) {
-    final document = record['document'] as Map;
-    final id = document['documentId'];
-    return jsonEncode({
-      'version': 1,
-      'placements': {name: id},
-      'presentations': {name: record['presentation']},
-      'paywalls': {id: document},
-      'preload': [],
-      'sessions': {}
-    });
-  }
-
-  /// 只在恢复时回收未被索引或其他会话租约持有的历史包。
-  Future<void> _prune() async {
-    final packages = Directory('${_index.parent.path}/packages');
-    final kept = _records.values
-        .whereType<Map>()
-        .map((record) => PaywallStorage.digest(record['document']))
-        .toSet();
-    if (!await packages.exists()) return;
-    await for (final entry in packages.list(followLinks: false)) {
-      if (entry is Directory &&
-          RegExp(r'^[a-f0-9]{64}$').hasMatch(entry.path.split('/').last) &&
-          !kept.contains(entry.path.split('/').last) &&
-          !WebPaywallResourceLease.isInUse(entry)) {
-        try {
-          await entry.delete(recursive: true);
-        } catch (_) {/* 下次恢复重试清理。 */}
-      }
-    }
-  }
+  /// 使用带环境的命名空间隔离索引与包，外部点位不参与路径拼接。
+  Future<File> _file() async =>
+      File('${(await archive.directory()).path}/index.json');
 }

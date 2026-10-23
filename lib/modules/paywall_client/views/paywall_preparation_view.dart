@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import '../../web_paywall/views/web_paywall_surface.dart';
 import '../services/paywall_preload.dart';
 
 /// 隐藏预渲染保留真实布局尺寸，禁止触摸和辅助功能访问。
@@ -19,8 +19,10 @@ class PaywallPreparationView extends StatelessWidget {
                   child: IgnorePointer(
                       child: Opacity(
                           opacity: 0,
-                          child: WebViewWidget(
-                              key: ObjectKey(web), controller: web.webView))));
+                          child: WebPaywallSurface(
+                              key: ObjectKey(web),
+                              controller: web,
+                              visible: false))));
             });
       });
 }

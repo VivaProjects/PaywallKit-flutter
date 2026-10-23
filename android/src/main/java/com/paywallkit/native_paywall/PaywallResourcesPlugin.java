@@ -19,6 +19,16 @@ public final class PaywallResourcesPlugin implements FlutterPlugin {
     public void onAttachedToEngine(FlutterPluginBinding binding) {
         channel = new MethodChannel(binding.getBinaryMessenger(), "native_paywall/resources");
         channel.setMethodCallHandler((call, result) -> {
+            if (call.method.equals("countryISO3")) {
+                String code = call.argument("country");
+                try {
+                    result.success(code != null && code.matches("[A-Za-z]{2}")
+                        ? new Locale("", code.toUpperCase(Locale.ROOT)).getISO3Country() : "");
+                } catch (java.util.MissingResourceException error) {
+                    result.success("");
+                }
+                return;
+            }
             if (call.method.equals("disableLongPress")) {
                 Number identifier = call.argument("identifier");
                 WebView view = identifier == null ? null :

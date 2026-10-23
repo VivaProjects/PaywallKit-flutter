@@ -20,6 +20,7 @@ import '../models/web_paywall_session_policy.dart';
 
 part 'web_paywall_actions.dart';
 part 'web_paywall_protocol.dart';
+part 'web_paywall_cached_products.dart';
 
 /// WebView 只负责展示；价格、购买和恢复仍走宿主商店接口。
 class WebPaywallController {
@@ -37,6 +38,7 @@ class WebPaywallController {
       this.onResourceSource,
       this.onActionFailure,
       this.requiresRenderReady = false,
+      this.keepSurfaceAlive = false,
       required this.allowsDismiss,
       required this.dismiss,
       required this.openLegal,
@@ -86,6 +88,10 @@ class WebPaywallController {
   void Function(String)? onResourceSource;
   void Function(String)? onActionFailure;
   final bool requiresRenderReady;
+
+  /// Android 常驻表面由会话持有，失效时与桥接资源一起释放。
+  final bool keepSurfaceAlive;
+  VoidCallback? releaseSurface;
   final contentHeight = ValueNotifier<double?>(null);
   bool _attached = false;
   bool _productsLoading = false;
@@ -109,12 +115,12 @@ class WebPaywallController {
   int _presentationID = 0;
 
   /// 可选策略独立控制展示依赖与交易权限，兼容旧宿主桥。
-  bool get requiresStoreProducts =>
-      bridge is! PaywallStoreActionPolicy ||
-      (bridge as PaywallStoreActionPolicy).requiresStoreProducts;
-  bool get allowsStoreActions =>
-      bridge is! PaywallStoreActionPolicy ||
-      (bridge as PaywallStoreActionPolicy).allowsStoreActions;
+  bool get requiresStoreProducts => bridge is PaywallStoreActionPolicy
+      ? (bridge as PaywallStoreActionPolicy).requiresStoreProducts
+      : bridge.requiresStoreProducts;
+  bool get allowsStoreActions => bridge is PaywallStoreActionPolicy
+      ? (bridge as PaywallStoreActionPolicy).allowsStoreActions
+      : bridge.allowsStoreActions;
 
   /// 曝光保留 H5 的原始请求顺序，旧页无显式请求时返回空列表。
   List<String> get requestedProductRefs => List.unmodifiable(
@@ -137,6 +143,7 @@ class WebPaywallController {
   void start() {
     if (!_active) return;
     _attached = true;
+    unawaited(_sendPresentationState());
     trace("session.attach", "preloaded=$_started");
     if (_started) {
       _beginPresentationDeadline();
@@ -150,34 +157,33 @@ class WebPaywallController {
   void attachPresentation() {
     if (!_active) return;
     _attached = true;
+    unawaited(_sendPresentationState());
     _beginPresentationDeadline();
     _notifyPresentation();
   }
 
   bool get awaitingProducts => _productsLoading;
   bool get isProcessing => _busy;
-  bool get canRetain => isReusable && ready.value && !_busy;
+  bool get canRetain =>
+      isReusable && ready.value && !_busy && !_productsLoading;
 
-  /// 暂时隐藏同一会话时关闭动作，保留重新显示需要的宿主回调。
+  /// 保留已渲染表面时关闭动作，不让未挂载的缓存页操作宿主。
   void pausePresentation() {
+    // 复用页面时重置滚动与展示序号，避免继承上一次展示位置。
     if (_attached && ready.value) {
-      unawaited(_send({
-        'type': 'presentationState',
-        'sessionID': _sessionID,
-        'visible': false
-      }));
       unawaited(webView
           .runJavaScript(
               "for (const e of new Set([document.scrollingElement, ...document.querySelectorAll('*')])) { if (e && e.scrollTop) e.scrollTo({top: 0, left: e.scrollLeft, behavior: 'instant'}); }")
           .catchError((Object _) {}));
     }
-    _attached = false;
     _presentationID++;
+    _attached = false;
+    unawaited(_sendPresentationState());
     _readyTimer?.cancel();
     _readyTimer = null;
   }
 
-  /// 保留已渲染表面时关闭动作，不让未挂载的缓存页操作宿主。
+  /// 缓存交接时解除旧宿主回调，临时隐藏仍保留回调。
   void detachPresentation() {
     pausePresentation();
     onFailure = null;
@@ -331,6 +337,8 @@ class WebPaywallController {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    releaseSurface?.call();
+    releaseSurface = null;
     _stop();
     contentHeight.dispose();
     failed.dispose();
@@ -371,10 +379,11 @@ class WebPaywallController {
     onFailure?.call(failure);
   }
 
-  /// 用户关闭后立刻阻断桥接，避免路由销毁之前继续投递消息。
+  /// 先关闭交互门禁，由宿主决定保留就绪页面或销毁，避免提前停止破坏缓存。
   void close() {
     if (!allowsDismiss || !_active || !_attached || _busy) return;
-    _stop();
+    _attached = false;
+    unawaited(_sendPresentationState());
     dismiss();
   }
 

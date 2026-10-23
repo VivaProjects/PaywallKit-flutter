@@ -117,9 +117,8 @@ class _PaywallSheetViewState extends State<PaywallSheetView> {
                                                   color: Colors.grey,
                                                   borderRadius:
                                                       BorderRadius.circular(2))))),
-                                Expanded(
-                                    child: SafeArea(
-                                        top: false, child: widget.child)),
+                                // H5 背景铺满导航栏后方，前景控件由网页自身安全区避让。
+                                Expanded(child: widget.child),
                               ]))))))
         ]);
       });

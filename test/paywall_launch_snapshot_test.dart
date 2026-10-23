@@ -110,39 +110,54 @@ void main() {
               expect((await first.resolve('settings'))!.document.revision, 1);
               expect(first.cachedPlacement('settings')!.document.localDirectory,
                   isNotNull);
+              await first.waitForQueryUpdate();
+              first.dispose();
               revision = 2;
               final second = await create();
               expect((await second.resolve('settings'))!.document.revision, 1);
-              await waitIndex((values) => values.any((v) =>
-                  v['records']['settings']?['document']['revision'] == 2));
+              await second.waitForQueryUpdate();
               expect((await second.resolve('settings'))!.document.revision, 1);
+              await second.waitForQueryUpdate();
+              second.dispose();
               final third = await create();
               expect((await third.resolve('settings'))!.document.revision, 2);
               await Future<void>.delayed(const Duration(milliseconds: 100));
               invalid = true;
+              await third.waitForQueryUpdate();
+              third.dispose();
               final failed = await create(version: 'failure');
               await expectLater(
                   failed.resolve('settings'), throwsFormatException);
               await expectLater(
                   failed.resolve('settings'), throwsFormatException);
+              await failed.waitForQueryUpdate();
+              failed.dispose();
               final fourth = await create();
               expect((await fourth.resolve('settings'))!.document.revision, 2);
               await Future<void>.delayed(const Duration(milliseconds: 100));
               invalid = false;
               broken = true;
               revision = 3;
+              await fourth.waitForQueryUpdate();
+              fourth.dispose();
               final fifth = await create();
               expect((await fifth.resolve('settings'))!.document.revision, 2);
               await Future<void>.delayed(const Duration(milliseconds: 100));
               empty = true;
               broken = false;
+              await fifth.waitForQueryUpdate();
+              fifth.dispose();
               final sixth = await create();
               expect((await sixth.resolve('settings'))!.document.revision, 2);
               await waitIndex((values) =>
-                  values.every((v) => (v['records'] as Map).isEmpty));
+                  values.every((v) => (v['placements'] as Map).isEmpty));
               expect((await sixth.resolve('settings'))!.document.revision, 2);
+              await sixth.waitForQueryUpdate();
+              sixth.dispose();
               final seventh = await create();
               expect(await seventh.resolve('settings'), isNull);
+              await seventh.waitForQueryUpdate();
+              seventh.dispose();
               final upgraded = await create(version: '2');
               expect(await upgraded.resolve('settings'), isNull);
               expect(queries, 9);

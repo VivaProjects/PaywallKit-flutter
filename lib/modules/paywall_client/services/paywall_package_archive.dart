@@ -17,9 +17,8 @@ class PaywallPackageArchive {
       required this.allowedOrigins,
       this.developmentHTTPOrigin,
       WebPaywallResourceCache? cache})
-      : cache = cache ??
-            WebPaywallResourceCache(
-                downloadTimeout: const Duration(seconds: 120));
+      // 下载、归档和展示必须共享租约与临时目录生命周期，不能各自清理同一根目录。
+      : cache = cache ?? WebPaywallResourceCache.shared;
   final Future<Directory> Function() directory;
   final String environment;
   final PaywallCatalog Function() catalog;
