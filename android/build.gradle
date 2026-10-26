@@ -8,7 +8,7 @@ buildscript {
 apply plugin: 'com.android.library'
 android {
     namespace 'com.paywallkit.native_paywall'
-    compileSdk 35
+    compileSdk 36
     defaultConfig { minSdk 21 }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
