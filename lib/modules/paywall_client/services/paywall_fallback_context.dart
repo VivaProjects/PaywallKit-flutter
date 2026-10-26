@@ -22,6 +22,7 @@ class PaywallFallbackContext {
   PaywallPlacement? current;
   PaywallPlacement? selected;
   PaywallFailure? reason;
+  bool presentation = true;
   bool local = false, bundledOnly = false, triedPrevious = false;
   bool get usesHistory => client.previousVersionPlacements.contains(placement);
   Duration get remaining => deadline.difference(DateTime.now());
@@ -43,7 +44,9 @@ class PaywallFallbackContext {
       }
       return _local();
     }
-    final value = await client.resolve(placement);
+    final value = await (presentation
+        ? client.resolveForPresentation(placement)
+        : client.resolve(placement));
     store = client.localPackages;
     await store?.initialize();
     _checkDisabled();

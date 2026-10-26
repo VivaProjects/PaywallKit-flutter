@@ -4,6 +4,7 @@ import '../../web_paywall/services/web_paywall_package_loader.dart';
 import '../../web_paywall/models/web_paywall_environment.dart';
 import '../../web_paywall/models/web_paywall_runtime_environment.dart';
 import 'paywall_query_fallback.dart';
+import 'paywall_query_update_diagnostic.dart';
 
 /// 高层查询声明；运行环境由宿主显式选择，不从编译或商店沙盒推断。
 class PaywallQueryConfiguration {
@@ -19,6 +20,7 @@ class PaywallQueryConfiguration {
       this.waitUntilNetworkAvailable,
       this.waitUntilNetworkAvailableCancellable,
       this.fetch,
+      this.onUpdateDiagnostic,
       this.packageLoader,
       this.legacyCacheNamespaces = const [],
       Stream<String>? storefrontChanges})
@@ -38,6 +40,9 @@ class PaywallQueryConfiguration {
   /// 兼容已有宿主；同时配置时优先使用可取消回调。
   final Future<void> Function()? waitUntilNetworkAvailable;
   final List<String> legacyCacheNamespaces;
+
+  /// 共享运行时每次更新仅通知首个配置的监听者，日志关闭时保持静默。
+  final void Function(PaywallQueryUpdateDiagnostic)? onUpdateDiagnostic;
 
   /// 可注入传输和完整包加载器，便于离线验证协议及启动缓存。
   final Future<String> Function(PaywallConfigurationRequest)? fetch;

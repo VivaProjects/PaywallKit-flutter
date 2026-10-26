@@ -14,6 +14,7 @@ class PaywallQueryResponse {
       required this.allowedOrigins,
       required this.catalog,
       this.developmentHTTPOrigin,
+      this.loadPackage,
       WebPaywallPackageLoader? loader})
       : placements = Map.unmodifiable(placements),
         loader = loader ?? WebPaywallPackageLoader();
@@ -22,6 +23,8 @@ class PaywallQueryResponse {
   final PaywallCatalog Function() catalog;
   final String? developmentHTTPOrigin;
   final WebPaywallPackageLoader loader;
+  final Future<WebPaywallDocument> Function(
+      Future<WebPaywallDocument> Function())? loadPackage;
 
   /// 同时最多准备两个完整包，未开始的下载优先处理可见入口。
   Future<Set<String>> load(
@@ -30,6 +33,7 @@ class PaywallQueryResponse {
     required Future<void> Function(String, WebPaywallDocument, String) onPage,
     required void Function(Set<String>) onUnavailable,
     String? Function()? preferredPlacement,
+    void Function()? onFailure,
   }) async {
     final selection = _select(source);
     final pending = selection.pending;
@@ -43,8 +47,15 @@ class PaywallQueryResponse {
         final name = item['placement']!;
         try {
           final address = item['address']!;
-          final doc =
-              await loaded.putIfAbsent(address, () => _load(address, request));
+          final doc = await loaded.putIfAbsent(address, () async {
+            try {
+              return await (loadPackage?.call(() => _load(address, request)) ??
+                  _load(address, request));
+            } catch (_) {
+              onFailure?.call();
+              rethrow;
+            }
+          });
           await onPage(name, doc, item['mode']!);
         } catch (error) {
           WebPaywallDiagnostics.log(request.environment.runtimeEnvironment.name,

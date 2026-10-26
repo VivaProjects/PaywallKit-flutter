@@ -33,3 +33,9 @@
 Flutter 原生长按实现通过 WebView 平台公开接口定位会话 WebView：iOS 使用文档起始脚本、文本交互/链接预览关闭及触摸前原生手势限制；Android 使用长按拦截和页面加载后的 DOM 限制。没有替换 webview_flutter 的导航/界面代理。其实际原生行为尚需真机检查。
 
 协议快照与 iOS 一致；新桥能力已与 web README 中的 deferredProducts 约定核对。兼容旧页，无显式商品请求的 ready 列表为空。未修改 iOS/H5 源码，未发布 SDK 版本。
+
+## 2026-10-26 增量同步（1.4.0）
+
+对齐参考 SDK 0.3.2 的有限弱网重试、入口三秒期限、迟到包次启动生效与更新终态诊断。Flutter 保留 Android 共享查询、16 页上限和严格信封校验。宿主可使用 `PaywallQueryConfiguration(onUpdateDiagnostic: ...)`，日志关闭时不回调；不要把下载完成解释为服务端发布。普通 `resolve` 继续等待后台任务，`resolveForPresentation` 供展示入口使用；SDK 预加载不会抢先固定超时。
+
+70 项自动化测试及静态分析通过；真实计费交易不属于该 SDK 回归。

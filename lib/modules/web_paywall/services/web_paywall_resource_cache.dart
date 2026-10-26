@@ -1,3 +1,4 @@
+import '../../paywall_client/models/paywall_http_failure.dart';
 import 'dart:async';
 import 'web_paywall_diagnostics.dart';
 import 'dart:convert';
@@ -209,12 +210,19 @@ class WebPaywallResourceCache {
     final remaining = deadline.difference(DateTime.now());
     if (remaining <= Duration.zero) throw TimeoutException('Package deadline');
     final client = HttpClient()..connectionTimeout = remaining;
-    final timer = Timer(remaining, () => client.close(force: true));
+    var timedOut = false;
+    final timer = Timer(remaining, () {
+      timedOut = true;
+      client.close(force: true);
+    });
     try {
       final request = await client.getUrl(uri).timeout(remaining);
       request.followRedirects = false;
       final response = await request.close().timeout(remaining);
-      if (response.statusCode != 200 || response.contentLength > limit) {
+      if (response.statusCode != 200) {
+        throw PaywallHttpFailure(response.statusCode);
+      }
+      if (response.contentLength > limit) {
         throw const HttpException('Invalid package response');
       }
       final bytes = <int>[];
@@ -224,6 +232,9 @@ class WebPaywallResourceCache {
         bytes.addAll(chunk);
       }
       return bytes;
+    } catch (_) {
+      if (timedOut) throw TimeoutException('Paywall download deadline');
+      rethrow;
     } finally {
       timer.cancel();
       client.close(force: true);

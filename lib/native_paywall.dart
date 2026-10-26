@@ -57,3 +57,5 @@ export 'modules/paywall_client/services/paywall_session_factory.dart';
 
 export 'modules/web_paywall/services/paywall_logging.dart';
 export 'modules/paywall_renderer/services/paywall_store_action_policy.dart';
+
+export 'modules/paywall_client/models/paywall_query_update_diagnostic.dart';

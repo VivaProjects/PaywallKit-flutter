@@ -71,8 +71,14 @@ void main() {
       await settle();
       expect(controller.requestedProductRefs, ['compare', 'annual']);
       if (deferred) {
-        expect(platform.controller.messages.last['type'], 'bootstrap');
-        expect(platform.controller.messages.last['products'], isEmpty);
+        expect(
+            platform.controller.messages
+                .lastWhere((m) => m['type'] == 'bootstrap')['type'],
+            'bootstrap');
+        expect(
+            platform.controller.messages
+                .lastWhere((m) => m['type'] == 'bootstrap')['products'],
+            isEmpty);
         platform.controller
             .receive({'type': 'bootstrapped', 'sessionID': session});
         platform.controller
@@ -82,7 +88,8 @@ void main() {
         expect(
             platform.controller.messages
                 .any((m) => m['type'] == 'presentationState'),
-            isFalse);
+            isTrue);
+        expect(platform.controller.messages.last['visible'], isFalse);
         controller.attachPresentation();
         await settle();
         expect(platform.controller.messages.last['visible'], isTrue);
@@ -102,9 +109,9 @@ void main() {
             disclosure: 'per year')
       ]);
       await settle();
-      expect(platform.controller.messages.last['type'],
-          deferred ? 'productsUpdated' : 'bootstrap');
-      expect(platform.controller.messages.last['products'], hasLength(1));
+      final productMessage = platform.controller.messages.lastWhere(
+          (m) => m['type'] == (deferred ? 'productsUpdated' : 'bootstrap'));
+      expect(productMessage['products'], hasLength(1));
       if (!deferred) {
         platform.controller
             .receive({'type': 'bootstrapped', 'sessionID': session});
@@ -147,7 +154,10 @@ void main() {
     platform.controller.receive({'type': 'ready', 'bridgeVersion': 2});
     bridge.productsResult.complete([]);
     await settle();
-    expect(platform.controller.messages.single['products'], isEmpty);
+    expect(
+        platform.controller.messages
+            .singleWhere((m) => m['type'] == 'bootstrap')['products'],
+        isEmpty);
     platform.controller.receive({'type': 'bootstrapped'});
     await settle();
     expect(controller.ready.value, isTrue);

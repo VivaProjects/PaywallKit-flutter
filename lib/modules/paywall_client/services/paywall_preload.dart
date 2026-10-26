@@ -40,6 +40,7 @@ class PaywallPreload {
     if (!controller.client.usesLaunchSnapshot) {
       _deadline = Timer(controller.timeout, cancel);
     }
+    controller.fallback.presentation = false;
     unawaited(controller.load());
   }
 

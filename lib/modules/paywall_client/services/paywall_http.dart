@@ -1,3 +1,4 @@
+import '../models/paywall_http_failure.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -11,7 +12,11 @@ class PaywallHttp {
       int limit = 1000000,
       Duration timeout = const Duration(seconds: 12)}) async {
     final client = HttpClient()..connectionTimeout = timeout;
-    final timer = Timer(timeout, () => client.close(force: true));
+    var timedOut = false;
+    final timer = Timer(timeout, () {
+      timedOut = true;
+      client.close(force: true);
+    });
     try {
       // 禁止自动重定向，来源信任必须由调用方显式校验。
       final request = await client.openUrl(method, uri).timeout(timeout);
@@ -22,7 +27,10 @@ class PaywallHttp {
         request.write(body);
       }
       final response = await request.close();
-      if (response.statusCode != 200 || response.contentLength > limit) {
+      if (response.statusCode != 200) {
+        throw PaywallHttpFailure(response.statusCode);
+      }
+      if (response.contentLength > limit) {
         throw const HttpException('Invalid paywall response');
       }
       // 按块限制大小，不能相信 Content-Length 一定存在或正确。
@@ -33,6 +41,9 @@ class PaywallHttp {
         bytes.addAll(chunk);
       }
       return utf8.decode(bytes);
+    } catch (_) {
+      if (timedOut) throw TimeoutException('Paywall download deadline');
+      rethrow;
     } finally {
       timer.cancel();
       client.close(force: true);

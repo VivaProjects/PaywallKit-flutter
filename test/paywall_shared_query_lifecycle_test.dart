@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:native_paywall/modules/paywall_client/models/paywall_http_failure.dart';
 
 // SDK 已依赖 crypto；这里用于生成与真实校验器一致的完整包夹具。
 // ignore: depend_on_referenced_packages
@@ -25,6 +26,7 @@ void main() {
       client.dispose();
     }
     clients.clear();
+    PaywallLogging.mode = PaywallLoggingMode.automatic;
     await root.delete(recursive: true);
   });
 
@@ -32,6 +34,7 @@ void main() {
   PaywallClient client(
     Future<String> Function() fetch, {
     Future<void> Function(Future<void>)? online,
+    void Function(PaywallQueryUpdateDiagnostic)? diagnostic,
   }) {
     final value = PaywallClient.query(
       query: PaywallQueryConfiguration(
@@ -42,6 +45,7 @@ void main() {
         environment: () async => _environment,
         packageLoader: packages,
         fetch: (_) => fetch(),
+        onUpdateDiagnostic: diagnostic,
         waitUntilNetworkAvailableCancellable: online,
       ),
       catalog: () => _catalog,
@@ -54,6 +58,127 @@ void main() {
   /// 归因预先明确，回归不依赖真实 SDK 或计时器。
   Future<void> ready(PaywallClient value) =>
       value.reportAttribution(channel: 'organic');
+
+  test('临时 HTTP 故障最多三次，恢复后仅报告一次完成', () async {
+    var attempts = 0;
+    final reports = <PaywallQueryUpdateDiagnostic>[];
+    final value = client(() async {
+      if (++attempts < 3) throw PaywallHttpFailure(503);
+      return _response(1);
+    }, diagnostic: reports.add);
+    await ready(value);
+    await value.waitForQueryUpdate();
+    expect(attempts, 3);
+    expect(reports.single.updatedPlacements, 1);
+    expect(reports.single.failures, 0);
+  });
+
+  test('单包临时失败重试后完整归档，已有版本仍供本次使用', () async {
+    final first = client(() async => _response(1));
+    await ready(first);
+    await first.waitForQueryUpdate();
+    first.dispose();
+    clients.remove(first);
+    packages.transientFailures = 1;
+    final reports = <PaywallQueryUpdateDiagnostic>[];
+    final value = client(() async => _response(2), diagnostic: reports.add);
+    await ready(value);
+    await value.waitForQueryUpdate();
+    expect(packages.loads, 3);
+    expect(reports.single.updatedPlacements, 1);
+    expect(reports.single.failures, 0);
+    expect(value.cachedPlacement('settings')!.document.revision, 1);
+  });
+
+  test('权限和无效数据不重试，最终失败只报告一次', () async {
+    for (final error in [
+      PaywallHttpFailure(403),
+      const FormatException('bad')
+    ]) {
+      var attempts = 0;
+      final reports = <PaywallQueryUpdateDiagnostic>[];
+      final value = client(() async {
+        attempts++;
+        throw error;
+      }, diagnostic: reports.add);
+      await ready(value);
+      await value.waitForQueryUpdate();
+      expect(attempts, 1);
+      expect(reports.single.failed, isTrue);
+      value.dispose();
+      clients.remove(value);
+    }
+  });
+
+  test('同版本无需更新，展示方式变化计为更新', () async {
+    for (var run = 0; run < 3; run++) {
+      final reports = <PaywallQueryUpdateDiagnostic>[];
+      final value = client(
+          () async => run == 2
+              ? _response(1).replaceAll('fullScreen', 'halfSheet')
+              : _response(1),
+          diagnostic: reports.add);
+      await ready(value);
+      await value.waitForQueryUpdate();
+      expect(reports.single.updatedPlacements, run == 1 ? 0 : 1);
+      expect(reports.single.failures, 0);
+      value.dispose();
+      clients.remove(value);
+    }
+  });
+
+  test('三秒入口兜底冻结，迟到包仅供下次启动，预加载不抢先超时', () async {
+    final response = Completer<String>();
+    final value = client(() => response.future);
+    await ready(value);
+    final pending = value.waitForQueryUpdate();
+    expect(await value.resolveForPresentation('result'), isNull);
+    response.complete(_response(2, result: true));
+    await pending;
+    expect(value.cachedPlacement('result'), isNull);
+    expect(value.cachedPlacement('settings'), isNotNull);
+    expect(await value.resolve('result'), isNull);
+    value.dispose();
+    clients.remove(value);
+    final next = client(() async => _response(3));
+    await next.restoreQuery();
+    expect(next.cachedPlacement('result')!.document.revision, 2);
+  });
+
+  test('取消退避立即结束且不通知；日志关闭时保持静默', () async {
+    final attempted = Completer<void>();
+    final reports = <PaywallQueryUpdateDiagnostic>[];
+    var attempts = 0;
+    final value = client(() async {
+      attempts++;
+      attempted.complete();
+      throw const SocketException('offline');
+    }, diagnostic: reports.add);
+    await ready(value);
+    final pending = value.waitForQueryUpdate();
+    await attempted.future;
+    value.dispose();
+    clients.remove(value);
+    await pending.timeout(const Duration(seconds: 1));
+    expect(attempts, 1);
+    expect(reports, isEmpty);
+    PaywallLogging.mode = PaywallLoggingMode.disabled;
+    final muted = client(() async => _response(1), diagnostic: reports.add);
+    await ready(muted);
+    await muted.waitForQueryUpdate();
+    expect(reports, isEmpty);
+  });
+
+  test('共享 Client 只提示一次，单包损坏统计失败而非更新', () async {
+    packages.fail = true;
+    final reports = <PaywallQueryUpdateDiagnostic>[];
+    final a = client(() async => _response(1), diagnostic: reports.add);
+    final b = client(() async => _response(1), diagnostic: reports.add);
+    await ready(a);
+    await Future.wait([a.waitForQueryUpdate(), b.waitForQueryUpdate()]);
+    expect(reports.single.updatedPlacements, 0);
+    expect(reports.single.failures, 1);
+  });
 
   test('两次启动：已有版本冻结，缺失点位即时可用，后台新版本下次生效', () async {
     final first = client(() async => _response(1));
@@ -271,6 +396,8 @@ class _Packages extends Fake implements WebPaywallPackageLoader {
   _Packages(this.root);
   final Directory root;
   bool fail = false;
+  int transientFailures = 0;
+  int loads = 0;
   @override
   Future<WebPaywallDocument> load(
     Uri uri, {
@@ -279,6 +406,8 @@ class _Packages extends Fake implements WebPaywallPackageLoader {
     required PaywallCatalog catalog,
     String? developmentHTTPOrigin,
   }) async {
+    loads++;
+    if (transientFailures-- > 0) throw PaywallHttpFailure(503);
     if (fail) throw const FormatException('Broken package');
     final name = uri.pathSegments[0], revision = int.parse(uri.pathSegments[1]);
     final directory = Directory('${root.path}/fixture-$name-$revision');

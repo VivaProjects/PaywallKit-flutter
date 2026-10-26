@@ -42,6 +42,11 @@ class PaywallClient {
   Future<void> Function()? queryPrepare, queryRestore, queryUpdate;
   Set<String> queryPlacementNames = {};
   Future<PaywallPlacement?> Function(String)? queryResolve;
+  Future<PaywallPlacement?> Function(String)? queryResolveForPresentation;
+
+  /// 展示入口等待最多三秒，预加载仍可等待完整后台准备。
+  Future<PaywallPlacement?> resolveForPresentation(String placement) =>
+      queryResolveForPresentation?.call(placement) ?? resolve(placement);
   PaywallPlacement? Function(String)? queryCached, queryLaunchFallback;
 
   /// 等待本次启动更新结束，诊断调用不会绕过唯一请求约束。
@@ -323,6 +328,7 @@ class PaywallClient {
 
   /// 宿主释放入口后，不再接收任何未完成的配置结果。
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     onDispose?.call();
     for (final page in _pages.values) {

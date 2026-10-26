@@ -90,7 +90,8 @@ void main() {
     await settle();
     platform.controller.receive({'type': 'ready', 'bridgeVersion': 2});
     await settle();
-    final bootstrap = platform.controller.messages.single;
+    final bootstrap = platform.controller.messages
+        .singleWhere((m) => m['type'] == 'bootstrap');
     expect(
         (bootstrap['products'] as List)
             .every((product) => !(product as Map).containsKey('title')),
@@ -127,6 +128,9 @@ void main() {
     platform.controller.receive({'type': 'ready', 'bridgeVersion': 2});
     await settle();
     expect(controller.failed.value, isFalse);
-    expect(platform.controller.messages.single['products'], hasLength(1));
+    expect(
+        platform.controller.messages
+            .singleWhere((m) => m['type'] == 'bootstrap')['products'],
+        hasLength(1));
   });
 }
