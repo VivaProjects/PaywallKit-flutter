@@ -1,5 +1,11 @@
 # Flutter SDK 变更记录
 
+## [1.4.2] - 2026-10-26
+
+- 合入 Android WebView 右侧和底部一个物理像素补偿，覆盖普通与常驻支付墙，保留原有裁剪和命中边界。
+
+- 验证：格式、Flutter 静态分析、包独立性和版本一致性检查通过；按宿主任务限制未运行测试、应用、原生构建或真机验证。
+
 ## [1.4.1] - 2026-10-26
 
 - Android compileSdk 提升至 36，修复 webview_flutter_android 依赖的 AAR metadata 校验失败。

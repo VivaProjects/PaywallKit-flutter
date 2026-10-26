@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../controllers/web_paywall_controller.dart';
 import '../services/web_paywall_resident_surface.dart';
+import 'web_paywall_overscan.dart';
 
 /// Android 常驻入口使用位置锚点，其他页面继续沿用原有 WebView 布局。
 class WebPaywallSurface extends StatefulWidget {
@@ -70,12 +71,14 @@ class _WebPaywallSurfaceState extends State<WebPaywallSurface> {
     if (!widget.controller.keepSurfaceAlive ||
         defaultTargetPlatform != TargetPlatform.android) {
       // 内容纵向拖动交给网页，避免 Settings 外层 BottomSheet 抢走滚动。
-      return WebViewWidget(
-        controller: widget.controller.webView,
-        gestureRecognizers: {
-          Factory<VerticalDragGestureRecognizer>(
-              VerticalDragGestureRecognizer.new),
-        },
+      return WebPaywallOverscan(
+        child: WebViewWidget(
+          controller: widget.controller.webView,
+          gestureRecognizers: {
+            Factory<VerticalDragGestureRecognizer>(
+                VerticalDragGestureRecognizer.new),
+          },
+        ),
       );
     }
     final surface = _resident();

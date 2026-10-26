@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../views/web_paywall_overscan.dart';
 
 /// 会话持有唯一平台视图；路由只提供位置锚点，隐藏和再次展示不卸载 WebView。
 class WebPaywallResidentSurface {
@@ -77,7 +78,7 @@ class WebPaywallResidentSurface {
                   alignment: Alignment.topLeft,
                   child: SizedBox.fromSize(
                     size: _size,
-                    child: ClipRect(child: _view),
+                    child: WebPaywallOverscan(child: _view),
                   ),
                 ),
               ),
