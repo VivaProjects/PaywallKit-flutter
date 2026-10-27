@@ -1,6 +1,8 @@
 export 'modules/paywall_renderer/models/paywall_catalog.dart';
 export 'modules/paywall_renderer/models/paywall_snapshot.dart';
 export 'modules/paywall_renderer/models/paywall_store_product.dart';
+export 'modules/paywall_renderer/models/paywall_pricing_phase.dart';
+export 'modules/paywall_renderer/models/paywall_subscription_pricing.dart';
 export 'modules/paywall_renderer/models/paywall_event.dart';
 export 'modules/paywall_renderer/models/paywall_runtime_copy.dart';
 export 'modules/paywall_renderer/services/paywall_configuration_service.dart';
@@ -59,3 +61,6 @@ export 'modules/web_paywall/services/paywall_logging.dart';
 export 'modules/paywall_renderer/services/paywall_store_action_policy.dart';
 
 export 'modules/paywall_client/models/paywall_query_update_diagnostic.dart';
+
+export 'modules/paywall_client/services/google_play/paywall_google_play_purchase_bridge.dart';
+export 'modules/paywall_client/services/google_play/paywall_google_play_purchase.dart';

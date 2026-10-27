@@ -197,6 +197,8 @@ extension WebPaywallProtocol on WebPaywallController {
         'productRef': ref,
         'displayPrice': product.displayPrice,
         'disclosure': product.disclosure,
+        if (product.subscriptionPricing != null)
+          'subscriptionPricing': product.subscriptionPricing!.toPayload(),
         if (product.periodText != null) 'periodText': product.periodText,
         if (product.dailyPriceText != null)
           'dailyPriceText': product.dailyPriceText,

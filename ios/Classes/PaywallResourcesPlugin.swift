@@ -25,7 +25,7 @@ public final class PaywallResourcesPlugin: NSObject, FlutterPlugin, FlutterStrea
             guard let args = call.arguments as? [String: Any],
                   let identifier = args["identifier"] as? NSNumber,
                   let script = args["script"] as? String, let registrar,
-                  let webView = WebViewFlutterWKWebViewExternalAPI.webView(
+                  let webView = FWFWebViewFlutterWKWebViewExternalAPI.webView(
                     forIdentifier: identifier.int64Value, withPluginRegistrar: registrar) else {
                 result(FlutterError(code: "webview", message: "WebView unavailable", details: nil)); return
             }

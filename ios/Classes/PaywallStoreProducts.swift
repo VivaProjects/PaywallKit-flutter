@@ -36,6 +36,9 @@ enum PaywallStoreProducts {
         if includesDailyPrice, let period, period.unit == .year, period.value > 0 {
             result["dailyPriceText"] = (product.price / Decimal(365 * period.value)).formatted(product.priceFormatStyle)
         }
+        if let phases = PaywallStoreKitPricing.phases(product, eligibleOffer: offer) {
+            result["subscriptionPricing"] = ["phases": phases]
+        }
         return result
     }
 

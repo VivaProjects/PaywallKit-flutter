@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import '../../paywall_renderer/models/paywall_subscription_pricing.dart';
 import '../../paywall_renderer/models/paywall_store_product.dart';
 
 /// iOS 的可选默认商店映射器，宿主仍可使用自己的本地化披露实现。
@@ -25,6 +26,11 @@ class PaywallStoreKitProductMapper {
   /// 保留原生模型中的标题但不注入 H5，网页仍使用自己的 content.json。
   static PaywallStoreProduct _product(Map<String, dynamic> value) =>
       PaywallStoreProduct(
+          subscriptionPricing: value['subscriptionPricing'] == null
+              ? null
+              : PaywallSubscriptionPricing.fromPayload(
+                  Map<String, dynamic>.from(
+                      value['subscriptionPricing'] as Map)),
           productRef: value['productRef'] as String,
           storeProductId: value['storeProductId'] as String,
           title: value['title'] as String,

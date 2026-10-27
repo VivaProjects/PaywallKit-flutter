@@ -34,7 +34,19 @@ void main() {
           'displayPrice': r'CA$9.99',
           'disclosure': 'renews monthly',
           'periodText': '1 month',
-          'isEligibleForFreeTrial': false
+          'isEligibleForFreeTrial': false,
+          'subscriptionPricing': {
+            'phases': [
+              {
+                'priceAmount': '9.99',
+                'currencyCode': 'CAD',
+                'displayPrice': r'CA$9.99',
+                'billingPeriod': 'P1M',
+                'billingCycleCount': 0,
+                'recurrenceMode': 'infiniteRecurring',
+              }
+            ]
+          }
         }
       ];
     });
@@ -47,6 +59,8 @@ void main() {
     final products = await PaywallStoreKitProductMapper.products(['annual']);
     expect(products.single.displayPrice, r'CA$9.99');
     expect(products.single.isEligibleForFreeTrial, isFalse);
+    expect(
+        products.single.subscriptionPricing!.phases.single.currencyCode, 'CAD');
     expect(
         (await PaywallEnvironmentProvider.capture(
                 storefrontCountry: () async => 'USA'))

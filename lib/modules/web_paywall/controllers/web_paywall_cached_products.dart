@@ -50,6 +50,7 @@ extension WebPaywallCachedProducts on WebPaywallController {
               product.dailyPriceText,
               product.introductoryPriceText,
               product.isEligibleForFreeTrial,
+              product.subscriptionPricing?.toPayload(),
             ]
       ]);
 }

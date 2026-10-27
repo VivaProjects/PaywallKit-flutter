@@ -3,6 +3,16 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('native billing dependency is limited to official store capability', () {
+    final gradle = File('android/build.gradle').readAsStringSync();
+    final dependencies = RegExp(r"implementation '([^']+)'")
+        .allMatches(gradle)
+        .map((m) => m[1]!.split(':').take(2).join(':'))
+        .toSet();
+    expect(dependencies.difference({'com.android.billingclient:billing'}),
+        isEmpty);
+    expect(dependencies, contains('com.android.billingclient:billing'));
+  });
   test('SDK dependencies and production imports remain framework independent',
       () {
     const allowed = {

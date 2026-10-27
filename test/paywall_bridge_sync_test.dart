@@ -8,13 +8,16 @@ import 'web_paywall_session_test.dart' show FakeBridge, settle;
 
 class ControlledBridge extends FakeBridge implements PaywallStoreActionPolicy {
   final productsResult = Completer<List<PaywallStoreProduct>>();
+  List<PaywallStoreProduct>? refreshedProducts;
   @override
   bool requiresStoreProducts = true;
   @override
   bool allowsStoreActions = true;
   @override
   Future<List<PaywallStoreProduct>> products(List<String> refs, String group) =>
-      productsResult.future;
+      refreshedProducts == null
+          ? productsResult.future
+          : Future.value(refreshedProducts);
 }
 
 void main() {
@@ -106,12 +109,25 @@ void main() {
             storeProductId: 'annual',
             title: 'ignored',
             displayPrice: r'$10',
-            disclosure: 'per year')
+            disclosure: 'per year',
+            subscriptionPricing: PaywallSubscriptionPricing(phases: [
+              PaywallPricingPhase.fromGooglePlay(
+                  priceAmountMicros: 10000000,
+                  priceCurrencyCode: 'USD',
+                  formattedPrice: r'$10',
+                  billingPeriod: 'P1Y',
+                  billingCycleCount: 0,
+                  recurrenceMode: 1),
+            ]))
       ]);
       await settle();
       final productMessage = platform.controller.messages.lastWhere(
           (m) => m['type'] == (deferred ? 'productsUpdated' : 'bootstrap'));
       expect(productMessage['products'], hasLength(1));
+      final quote = (productMessage['products'] as List).single as Map;
+      expect(quote['subscriptionPricing']['phases'][0]['priceAmount'],
+          '10.000000');
+      expect(quote.containsKey('title'), isFalse);
       if (!deferred) {
         platform.controller
             .receive({'type': 'bootstrapped', 'sessionID': session});
@@ -127,6 +143,27 @@ void main() {
       await settle();
       expect(platform.controller.messages.last['visible'], isTrue);
       expect(controller.requestedProductRefs, ['compare', 'annual']);
+      expect(await controller.validateRetainedProducts(), isTrue);
+      // 旧展示字段不变，仅结构化周期变化也必须阻止旧报价复用。
+      bridge.refreshedProducts = [
+        PaywallStoreProduct(
+          productRef: 'annual',
+          storeProductId: 'annual',
+          title: 'ignored',
+          displayPrice: r'$10',
+          disclosure: 'per year',
+          subscriptionPricing: PaywallSubscriptionPricing(phases: [
+            PaywallPricingPhase.fromGooglePlay(
+                priceAmountMicros: 10000000,
+                priceCurrencyCode: 'USD',
+                formattedPrice: r'$10',
+                billingPeriod: 'P1M',
+                billingCycleCount: 0,
+                recurrenceMode: 1),
+          ]),
+        )
+      ];
+      expect(await controller.validateRetainedProducts(), isFalse);
     });
   }
   test(

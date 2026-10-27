@@ -1,6 +1,8 @@
 package com.paywallkit.native_paywall;
 
 import java.util.HashMap;
+import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import android.webkit.WebView;
 import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi;
 import java.util.Locale;
@@ -12,13 +14,16 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.MethodChannel;
 
 /** 返回 Android noBackupFilesDir 下的私有持久目录。 */
-public final class PaywallResourcesPlugin implements FlutterPlugin {
+public final class PaywallResourcesPlugin implements FlutterPlugin, ActivityAware {
     private MethodChannel channel;
+    private PaywallGooglePlayStore store;
 
     @Override
     public void onAttachedToEngine(FlutterPluginBinding binding) {
+        store = new PaywallGooglePlayStore(binding.getApplicationContext());
         channel = new MethodChannel(binding.getBinaryMessenger(), "native_paywall/resources");
         channel.setMethodCallHandler((call, result) -> {
+            if (call.method.startsWith("googlePlay")) { store.handle(call, result); return; }
             if (call.method.equals("countryISO3")) {
                 String code = call.argument("country");
                 try {
@@ -80,8 +85,15 @@ public final class PaywallResourcesPlugin implements FlutterPlugin {
         });
     }
 
+    @Override public void onAttachedToActivity(ActivityPluginBinding binding) { store.setActivity(binding.getActivity()); }
+    @Override public void onDetachedFromActivityForConfigChanges() { store.setActivity(null); }
+    @Override public void onReattachedToActivityForConfigChanges(ActivityPluginBinding binding) { store.setActivity(binding.getActivity()); }
+    @Override public void onDetachedFromActivity() { if (store != null) store.setActivity(null); }
+
     @Override
     public void onDetachedFromEngine(FlutterPluginBinding binding) {
+        store.close();
+        store = null;
         channel.setMethodCallHandler(null);
         channel = null;
     }

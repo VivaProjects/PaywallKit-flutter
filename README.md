@@ -19,8 +19,10 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 1.4.2
+      ref: 1.5.0
 ```
+
+iOS 插件当前使用 CocoaPods。宿主若默认开启 Swift Package Manager，请在宿主 `pubspec.yaml` 的 `flutter.config` 中设置 `enable-swift-package-manager: false`。
 
 包已经位于仓库根目录，无需 Git `path` 字段。使用版本标签固定依赖。当前配置保留 `publish_to: none`，支持 Git 发布与接入，不代表已具备 pub.dev 公共发布条件。
 
@@ -53,3 +55,9 @@ SDK 不依赖宿主状态管理、路由或依赖注入框架，可在普通 Mat
 1.1.0 新增启动快照与单次查询、延迟商品加载、日志开关和展示通知；行为迁移与新增接口见 [Flutter Client](docs/FLUTTER_CLIENT.md#本次同步新增接口与行为)。WebView 平台插件需满足当前直接依赖的最低版本要求。
 
 1.3.0 的 Android 缓存、共享查询和旧快照迁移说明见 [合并与接入说明](docs/ANDROID_MERGE_1_3.md)。
+
+## 结构化商品价格
+
+支持两端共有的金额、币种、计费周期和适用收费阶段，见 [接入说明](protocol/SUBSCRIPTION_PRICING.md)。旧商品字段保持兼容。
+
+Android 可使用 SDK 默认 `PaywallGooglePlayPurchaseBridge` 自动查询适用优惠、注入收费阶段并购买同一方案；仅需连接已有验单回调，详见 [共有商品协议](protocol/SUBSCRIPTION_PRICING.md)。依赖审查与兼容范围见 [Android Billing 接入](docs/ANDROID_BILLING.md)。

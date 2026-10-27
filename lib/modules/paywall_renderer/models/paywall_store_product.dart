@@ -1,3 +1,5 @@
+import 'paywall_subscription_pricing.dart';
+
 class PaywallStoreProduct {
   const PaywallStoreProduct(
       {required this.productRef,
@@ -8,10 +10,12 @@ class PaywallStoreProduct {
       this.periodText,
       this.dailyPriceText,
       this.introductoryPriceText,
-      this.isEligibleForFreeTrial});
+      this.isEligibleForFreeTrial,
+      this.subscriptionPricing});
   final String productRef, storeProductId, title, displayPrice, disclosure;
 
   /// 宿主确认的免费试用资格；缺省时 H5 不展示试用承诺。
   final bool? isEligibleForFreeTrial;
+  final PaywallSubscriptionPricing? subscriptionPricing;
   final String? periodText, dailyPriceText, introductoryPriceText;
 }
