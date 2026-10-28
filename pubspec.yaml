@@ -1,6 +1,6 @@
 name: native_paywall
 description: Native and H5 paywall SDK with host-owned purchases, offline fallback and managed sessions.
-version: 1.6.0
+version: 1.6.1
 publish_to: none
 repository: https://github.com/VivaProjects/PaywallKit-flutter
 environment:

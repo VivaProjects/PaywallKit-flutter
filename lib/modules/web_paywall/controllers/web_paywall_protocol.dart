@@ -88,7 +88,9 @@ extension WebPaywallProtocol on WebPaywallController {
     }
     _expectsProductRequest =
         capabilities is List && capabilities.contains('productRequest');
-    _supportsDeferredProducts = _expectsProductRequest &&
+    // 冷启动等严格入口必须取得报价后初始化，不能用空商品首屏提前完成门禁。
+    _supportsDeferredProducts = !environment.waitsForProducts &&
+        _expectsProductRequest &&
         _expectsRenderReady &&
         capabilities is List &&
         capabilities.contains('deferredProducts');
@@ -159,6 +161,10 @@ extension WebPaywallProtocol on WebPaywallController {
           ? <String>[]
           : document.productRefs.where(
               (ref) => !sessionPolicy!.optionalProductRefs.contains(ref));
+      if (environment.waitsForProducts && _products.isEmpty) {
+        _fail("products_empty");
+        return;
+      }
       if (requiresStoreProducts &&
           (_products.isEmpty ||
               requiredRefs.any((ref) => !_products.containsKey(ref)))) {

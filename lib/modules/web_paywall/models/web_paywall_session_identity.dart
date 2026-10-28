@@ -20,5 +20,7 @@ String webPaywallSessionIdentity({
       document.initialProductRef,
       storefrontGroup,
       environment.toPayload(),
+      // 等待策略变化时不能复用此前提前就绪的页面。
+      environment.waitsForProducts,
       customIdentity,
     ]);

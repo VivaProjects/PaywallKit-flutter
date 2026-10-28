@@ -6,6 +6,7 @@ class WebPaywallEnvironment {
   const WebPaywallEnvironment({
     String? os,
     this.isPad = false,
+    this.waitsForProducts = false,
     this.placement = '',
     this.runtimeEnvironment = WebPaywallRuntimeEnvironment.test,
     required this.language,
@@ -16,6 +17,9 @@ class WebPaywallEnvironment {
 
   final String? _os;
   final bool isPad;
+
+  /// 等待真实商品后初始化首屏；仅影响原生门禁，不注入 H5 展示数据。
+  final bool waitsForProducts;
 
   /// 未覆盖系统时读取实际平台；不将非移动平台误报为 Android。
   String get os {
@@ -39,15 +43,17 @@ class WebPaywallEnvironment {
   final String appVersion;
 
   /// 高层入口冻结实际点位，不从页面 ID 推断入口。
-  WebPaywallEnvironment forPlacement(String value) => WebPaywallEnvironment(
-      os: os,
-      isPad: isPad,
-      placement: value,
-      runtimeEnvironment: runtimeEnvironment,
-      language: language,
-      deviceModel: deviceModel,
-      country: country,
-      appVersion: appVersion);
+  WebPaywallEnvironment forPlacement(String value, {bool? waitsForProducts}) =>
+      WebPaywallEnvironment(
+          os: os,
+          isPad: isPad,
+          waitsForProducts: waitsForProducts ?? this.waitsForProducts,
+          placement: value,
+          runtimeEnvironment: runtimeEnvironment,
+          language: language,
+          deviceModel: deviceModel,
+          country: country,
+          appVersion: appVersion);
 
   /// 国家只接受宿主从商店取得的 alpha-3 值，未知时保留空字符串。
   String get validatedCountry {
