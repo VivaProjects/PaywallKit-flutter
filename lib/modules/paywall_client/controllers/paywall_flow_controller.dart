@@ -1,12 +1,14 @@
 import '../../paywall_renderer/models/paywall_runtime_copy.dart';
 import 'dart:async';
 import 'dart:convert';
+import '../../web_paywall/services/web_paywall_diagnostics.dart';
 import 'package:flutter/foundation.dart';
 import '../../paywall_renderer/services/paywall_purchase_bridge.dart';
 import '../../web_paywall/controllers/web_paywall_controller.dart';
 import '../../web_paywall/models/web_paywall_document.dart';
 import '../../web_paywall/models/web_paywall_configuration.dart';
 import '../../web_paywall/services/web_paywall_resource_cache.dart';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 import '../models/paywall_failure.dart';
 import '../models/paywall_placement.dart';
 import '../models/paywall_session_input.dart';
@@ -60,7 +62,12 @@ class PaywallFlowController {
   WebPaywallPresentation presentation = WebPaywallPresentation.fullScreen;
   void Function(PaywallSessionEventType)? onExit;
   Timer? _deadline;
+  final _loadClock = Stopwatch();
   int _generation = 0;
+  int? _successGeneration;
+  Future<void>? _successRecord;
+  WebPaywallController? _successWeb;
+  WebPaywallResourcePreparation? _resourcePreparation;
   bool _active = true,
       _attached = false,
       _started = false,
@@ -106,11 +113,22 @@ class PaywallFlowController {
     preparing.value = true;
     failure.value = null;
     final token = ++_generation;
+    _loadClock
+      ..reset()
+      ..start();
+    _resourcePreparation?.close();
+    final resources = _resourcePreparation = WebPaywallResourcePreparation();
     try {
       final choice = fallback.selected ??
           await (client.usesLaunchSnapshot
-              ? fallback.resolve()
-              : fallback.resolve().timeout(fallback.remaining));
+              ? fallback.resolve(preparation: resources)
+              : fallback
+                  .resolve(preparation: resources)
+                  .timeout(fallback.remaining));
+      WebPaywallDiagnostics.log(
+          choice.environment.runtimeEnvironment.name,
+          'flow.selection',
+          'flow=${identityHashCode(this)} generation=$token placement=$placement durationMs=${_loadClock.elapsedMilliseconds} source=${choice.source}');
       if (client.usesLaunchSnapshot) fallback.retryDeadline();
       if (!_current(token)) return;
       if (selected == null && !presentationFrozen) {
@@ -122,6 +140,10 @@ class PaywallFlowController {
         await _recover(
             error is PaywallFailure ? error : PaywallFailure.configuration,
             token);
+    } finally {
+      // 网页已接管则由网页释放；失败或取消前未建立网页的结果在此归还。
+      if (!identical(_resourcePreparation, resources) || web.value == null)
+        resources.close();
     }
   }
 
@@ -130,7 +152,12 @@ class PaywallFlowController {
     selected = choice;
     final PaywallSessionInput input;
     try {
-      input = await prepare(choice.document).timeout(fallback.remaining);
+      input = await WebPaywallDiagnostics.measure(
+          choice.environment.runtimeEnvironment.name,
+          'flow.host_prepare',
+          () => prepare(choice.document).timeout(fallback.remaining),
+          detail:
+              'flow=${identityHashCode(this)} generation=$token placement=$placement');
     } catch (error) {
       throw error is PaywallFailure ? error : PaywallFailure.eligibility;
     }
@@ -142,6 +169,8 @@ class PaywallFlowController {
     final controller =
         client.takeRetainedPage(placement, cacheIdentity, fresh) ?? fresh;
     web.value = controller;
+    controller.trace('flow.link',
+        'flow=${identityHashCode(this)} generation=$token reused=${!identical(controller, fresh)} prepareMs=${_loadClock.elapsedMilliseconds}');
     if (refreshProductsAfterReuse && !identical(controller, fresh)) {
       unawaited(_refreshRetainedProducts(controller, token));
     }
@@ -185,6 +214,7 @@ class PaywallFlowController {
           custom: input.custom,
           sessionPolicy: choice.sessionPolicy,
           resourceCache: resourceCache,
+          resourcePreparation: _resourcePreparation,
           requiresRenderReady: true,
           keepSurfaceAlive: client.residentPlacements
                   .contains(input.custom['entryPlacement'] ?? placement) &&
@@ -245,6 +275,8 @@ class PaywallFlowController {
   /// 首屏只上报一次，完整包归档失败不影响已经成功显示的页面。
   void _rendered(int token) {
     if (!_current(token) || ready.value) return;
+    web.value?.trace('flow.render_observed',
+        'flow=${identityHashCode(this)} generation=$token totalMs=${_loadClock.elapsedMilliseconds}');
     _deadline?.cancel();
     ready.value = true;
     preparing.value = false;
@@ -255,9 +287,7 @@ class PaywallFlowController {
         productRefs: web.value!.requestedProductRefs));
     if (jsonEncode(web.value!.document.productRefs) ==
         jsonEncode(choice.document.productRefs)) {
-      unawaited(client
-          .recordSuccess(choice, () => _current(token))
-          .catchError((Object _) {}));
+      unawaited(_recordSuccessOnce().catchError((Object _) {}));
     }
   }
 
@@ -281,7 +311,11 @@ class PaywallFlowController {
           return;
         }
         try {
-          final choice = await fallback.advance(nextReason);
+          _resourcePreparation?.close();
+          final resources =
+              _resourcePreparation = WebPaywallResourcePreparation();
+          final choice =
+              await fallback.advance(nextReason, preparation: resources);
           if (!_current(token)) return;
           if (choice == null) {
             _fail(nextReason);
@@ -297,6 +331,7 @@ class PaywallFlowController {
       if (_current(token)) _fail(nextReason);
     } finally {
       _recovering = false;
+      if (web.value == null) _resourcePreparation?.close();
     }
   }
 
@@ -310,6 +345,7 @@ class PaywallFlowController {
 
   /// 错误页保留关闭入口，不再接受旧网页消息。
   void _fail(PaywallFailure reason) {
+    _resourcePreparation?.close();
     failure.value = reason;
     preparing.value = false;
     _emit(PaywallSessionEvent(PaywallSessionEventType.failed, failure: reason));
@@ -346,6 +382,7 @@ class PaywallFlowController {
 
   /// 标记退出后立即阻断动作，路由退场完成后才释放展示所有权。
   void _exit(PaywallSessionEventType type) {
+    _resourcePreparation?.close();
     _closing = true;
     _generation++;
     _deadline?.cancel();
@@ -368,21 +405,43 @@ class PaywallFlowController {
   /// 每次异步恢复必须验证当前会话仍在使用同一代状态。
   bool _current(int token) => _active && !_closing && token == _generation;
 
+  /// 同一代次的同一网页共享成功记录，自动回退后的新网页独立提交。
+  Future<void> _recordSuccessOnce() {
+    final currentWeb = web.value!;
+    if (_successGeneration == _generation &&
+        identical(_successWeb, currentWeb) &&
+        _successRecord != null) {
+      return _successRecord!;
+    }
+    final token = _generation;
+    final choice = selected!;
+    _successGeneration = token;
+    _successWeb = currentWeb;
+    return _successRecord = Future<void>.sync(() => client.recordSuccess(
+        choice, () => _current(token) && identical(web.value, currentWeb)));
+  }
+
   /// 常驻预热成功后保留表面，归档完成前仍允许验证当前准备身份。
   Future<bool> parkInCache(bool Function() isCurrent) async {
+    final currentWeb = web.value;
+    final token = _generation;
     if (!ready.value || !isUsable || web.value == null || selected == null)
       return false;
     try {
-      await client.recordSuccess(selected!, () => _active && isCurrent());
+      await _recordSuccessOnce();
     } catch (_) {/* 历史不可写不阻断当前已就绪缓存。 */}
-    if (!_active || !isCurrent()) return false;
-    _retainedWeb = client.retainPage(placement, cacheIdentity, web.value!);
+    if (!_current(token) ||
+        !isCurrent() ||
+        !ready.value ||
+        !identical(web.value, currentWeb)) return false;
+    _retainedWeb = client.retainPage(placement, cacheIdentity, currentWeb!);
     if (_retainedWeb) cancel();
     return _retainedWeb;
   }
 
   /// 未挂载的预渲染和路由释放共用同一清理入口。
   void cancel() {
+    _resourcePreparation?.close();
     _active = false;
     _generation++;
     _deadline?.cancel();

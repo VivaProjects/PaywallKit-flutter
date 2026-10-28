@@ -3,6 +3,7 @@ import '../models/paywall_placement.dart';
 import '../../web_paywall/models/web_paywall_configuration.dart';
 import 'paywall_client.dart';
 import 'paywall_local_package_store.dart';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 
 /// 一次展示只向前推进：当前版本、同页旧版、本地更新包、内置包。
 class PaywallFallbackContext {
@@ -28,11 +29,12 @@ class PaywallFallbackContext {
   Duration get remaining => deadline.difference(DateTime.now());
 
   /// 第一次解析点位，专属本地入口完全绕过配置网络请求。
-  Future<PaywallPlacement> resolve() async {
+  Future<PaywallPlacement> resolve(
+      {WebPaywallResourcePreparation? preparation}) async {
     await store?.initialize();
     _checkDisabled();
     if (local) {
-      await client.restoreQuery();
+      await client.restoreQuery(placement: placement, preparation: preparation);
       final launch = client.queryRestore == null
           ? null
           : client.cachedPlacement(placement);
@@ -42,11 +44,10 @@ class PaywallFallbackContext {
         local = false;
         return launch;
       }
-      return _local();
+      return _local(preparation);
     }
-    final value = await (presentation
-        ? client.resolveForPresentation(placement)
-        : client.resolve(placement));
+    final value =
+        await client.resolvePrepared(placement, presentation, preparation);
     store = client.localPackages;
     await store?.initialize();
     _checkDisabled();
@@ -56,7 +57,8 @@ class PaywallFallbackContext {
   }
 
   /// 回退不处理取消和资格错误，商店不可用只在显式历史范围内回退。
-  Future<PaywallPlacement?> advance(PaywallFailure failure) async {
+  Future<PaywallPlacement?> advance(PaywallFailure failure,
+      {WebPaywallResourcePreparation? preparation}) async {
     _checkDisabled();
     if (!(failure.permitsFallback ||
             usesHistory && failure == PaywallFailure.productsUnavailable) ||
@@ -68,7 +70,8 @@ class PaywallFallbackContext {
       if (usesHistory && !triedPrevious && current != null) {
         triedPrevious = true;
         try {
-          final previous = await client.previousPlacement(current!);
+          final previous = await client.previousPlacement(current!,
+              preparation: preparation);
           if (previous != null) {
             retryDeadline();
             return selected = _withReason(previous);
@@ -83,13 +86,15 @@ class PaywallFallbackContext {
       bundledOnly = true;
     }
     retryDeadline();
-    return _local();
+    return _local(preparation);
   }
 
   /// 本地包整体替换页面商品绑定，同时保留真实入口用于 H5 与日志。
-  Future<PaywallPlacement> _local() async {
+  Future<PaywallPlacement> _local(
+      WebPaywallResourcePreparation? preparation) async {
     _checkDisabled();
-    await client.restoreQuery();
+    await client.restoreQuery(
+        placement: store!.placement, preparation: preparation);
     final launch = client.queryLaunchFallback?.call(store!.placement);
     // 同一个启动包已经失败时直接退内置，禁止在回退链中重复选择。
     if (!bundledOnly &&
@@ -105,7 +110,8 @@ class PaywallFallbackContext {
           fallbackReason: reason?.name);
     }
     final value = await store!.selection(
-        bundledOnly: client.queryRestore == null ? bundledOnly : true);
+        bundledOnly: client.queryRestore == null ? bundledOnly : true,
+        preparation: preparation);
     final environment = await client.currentEnvironment();
     if (environment.runtimeEnvironment.name != store!.archive.environment)
       throw PaywallFailure.configuration;

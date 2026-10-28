@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = 'native_paywall'
-  s.version = '1.5.0'
+  s.version = '1.6.0'
   s.summary = 'Paywall resources, StoreKit environment and product mapping.'
   s.description = 'Provides private offline storage, storefront updates and optional StoreKit price mapping.'
   s.homepage = 'https://github.com/VivaProjects/PaywallKit-flutter'

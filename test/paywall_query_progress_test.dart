@@ -20,6 +20,55 @@ class ControlledLoader extends WebPaywallPackageLoader {
 }
 
 void main() {
+  test('two aliases of a blocked package occupy only one worker', () async {
+    final loader = ControlledLoader();
+    final response = PaywallQueryResponse(
+        placements: {'slow': 'slow', 'alias': 'alias', 'fast': 'fast'},
+        allowedOrigins: {'https://example.com'},
+        catalog: () =>
+            PaywallCatalog(productRefs: ['product'], recommendedRef: 'product'),
+        loader: loader);
+    final delivered = <String>[];
+    final fast = Completer<void>();
+    final task = response.load(
+        jsonEncode({
+          'code': '200',
+          'data': [
+            for (final name in ['slow', 'alias', 'fast'])
+              {
+                'positionKey': name,
+                'matched': true,
+                'h5Url':
+                    'https://example.com/${name == 'alias' ? 'slow' : name}/index.html'
+              }
+          ]
+        }),
+        PaywallConfigurationRequest.query(
+            endpoint: Uri.parse('https://example.com/query'),
+            environment: const WebPaywallEnvironment(
+                os: 'iOS',
+                language: 'en',
+                deviceModel: 'phone',
+                country: 'USA',
+                appVersion: '1'),
+            channelKey: 'organic'),
+        preferredPlacement: () => 'alias',
+        onUnavailable: (_) {},
+        onPage: (name, doc, mode) async {
+          delivered.add(name);
+          if (name == 'fast') fast.complete();
+        });
+    try {
+      await fast.future.timeout(const Duration(seconds: 2));
+      expect(delivered, ['fast']);
+      expect(loader.started.where((p) => p.contains('slow')), hasLength(1));
+    } finally {
+      loader.blocked.complete(fixtures.document('slow'));
+      await task;
+    }
+    expect(delivered.toSet(), {'slow', 'alias', 'fast'});
+    expect(delivered, ['fast', 'alias', 'slow']);
+  });
   test(
       'fast complete package commits before unrelated slow package and shared URLs load once',
       () async {

@@ -34,6 +34,24 @@ class FlowBridge implements PaywallPurchaseBridge {
       PaywallPurchaseResult.succeeded;
 }
 
+/// 只延迟成功记录，流程、WebView、回退和缓存仍使用生产实现。
+class RecordingClient extends PaywallClient {
+  RecordingClient({required super.configuration})
+      : super(retainedPlacements: {'banner'});
+  final records = <({
+    PaywallPlacement page,
+    bool Function() current,
+    Completer<void> done
+  })>[];
+  @override
+  Future<void> recordSuccess(
+      PaywallPlacement selected, bool Function() isCurrent) {
+    final done = Completer<void>();
+    records.add((page: selected, current: isCurrent, done: done));
+    return done.future;
+  }
+}
+
 const env = WebPaywallEnvironment(
     os: 'iOS',
     language: 'en',
@@ -277,5 +295,63 @@ void main() {
         document: current, purchaseBridge: bridge, environment: env));
     await task;
     expect(flow.web.value, isNull);
+  });
+
+  test(
+      'success record belongs to each actual page; stale parking cannot retain fallback',
+      () async {
+    final recording = RecordingClient(configuration: client.configuration);
+    client.dispose();
+    client = recording;
+    final bundled = fixtures.document('fallback');
+    final archive = PaywallPackageArchive(
+        directory: () => storage.folder('archive', 'recording'),
+        environment: 'test',
+        catalog: () =>
+            PaywallCatalog(productRefs: ['product'], recommendedRef: 'product'),
+        allowedOrigins: {'https://example.com'},
+        cache: cache);
+    final local = await archive.bundled('fallback',
+        bundle: MemoryBundle({
+          for (final entry in fixtures.fixture(bundled).entries)
+            'fallback/${entry.key.pathSegments.last}': entry.value,
+        }));
+    client.useLocalPackages(PaywallLocalPackageStore(
+        placement: 'settings',
+        fallbackPlacements: {'banner'},
+        archive: archive,
+        bundled: () async => local));
+    final flow = create();
+    try {
+      await flow.load();
+      await bootstrap(platform);
+      await ready(platform);
+      expect(recording.records, hasLength(1));
+      final firstWeb = flow.web.value;
+      final stalePark = flow.parkInCache(() => true);
+      expect(recording.records, hasLength(1));
+      await fail(platform);
+      await bootstrap(platform);
+      await ready(platform);
+      expect(flow.selected!.source, 'bundled');
+      expect(flow.web.value, isNot(same(firstWeb)));
+      expect(recording.records, hasLength(2));
+      expect(recording.records.first.current(), isFalse);
+      expect(recording.records.last.current(), isTrue);
+      recording.records.first.done.complete();
+      expect(await stalePark, isFalse);
+      final currentWeb = flow.web.value;
+      final freshPark = flow.parkInCache(() => true);
+      expect(recording.records, hasLength(2));
+      recording.records.last.done.complete();
+      expect(await freshPark, isTrue);
+      // 保留成功后当前流程退出，网页仍由 Client 缓存持有。
+      expect(flow.web.value, isNull);
+      expect(currentWeb!.isReusable, isTrue);
+    } finally {
+      for (final record in recording.records) {
+        if (!record.done.isCompleted) record.done.complete();
+      }
+    }
   });
 }

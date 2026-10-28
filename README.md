@@ -19,7 +19,7 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 1.5.0
+      ref: 1.6.0
 ```
 
 iOS 插件当前使用 CocoaPods。宿主若默认开启 Swift Package Manager，请在宿主 `pubspec.yaml` 的 `flutter.config` 中设置 `enable-swift-package-manager: false`。
@@ -61,3 +61,13 @@ SDK 不依赖宿主状态管理、路由或依赖注入框架，可在普通 Mat
 支持两端共有的金额、币种、计费周期和适用收费阶段，见 [接入说明](protocol/SUBSCRIPTION_PRICING.md)。旧商品字段保持兼容。
 
 Android 可使用 SDK 默认 `PaywallGooglePlayPurchaseBridge` 自动查询适用优惠、注入收费阶段并购买同一方案；仅需连接已有验单回调，详见 [共有商品协议](protocol/SUBSCRIPTION_PRICING.md)。依赖审查与兼容范围见 [Android Billing 接入](docs/ANDROID_BILLING.md)。
+
+资源下载按包复用后台校验工作者，磁盘包复验在后台 isolate 执行。自动容量清理不阻塞资源交付，`await cache.clear()` 仍等待清理完成并保护活跃租约。默认查询批次借出下载租约供归档使用，复制目标和跨启动读取仍完整校验；自定义加载器沿用原有 `load` 路径。
+
+唯一配置请求可与启动缓存恢复重叠；响应必须等启动版本冻结后才应用，同查询内别名点位共享归档结果，仍独立检查当前商品目录及提交索引。复用不跨查询或启动，版本、环境、归因和失败回退规则保持不变。
+
+常驻预热通过商品状态通知等待查询结束，取消、超时或销毁均解除监听。首屏与预热交接共享本页面的成功记录任务；自动回退后的新 WebView 独立记录，旧任务完成不能交接新页面。
+
+同次加载中刚完成的本地包校验可一次性交接给 WebView，期间持有目录租约。交接对象通过参数传递并由流程/网页释放，不保存全局“验证通过”状态；已有启动快照的后续展示、重试、外部目录与完整身份不匹配仍走完整校验。自定义仓库保留 `open` 覆写行为。查询的两个加载工作者按不同包地址领取任务，同包别名逐点提交。
+
+真机加载耗时采集与阶段判读见 [加载耗时诊断](docs/LOAD_TIMING.md)。

@@ -1,7 +1,8 @@
+import '../../web_paywall/models/web_paywall_resource_lease.dart';
 import 'dart:async';
+import 'dart:convert';
 import '../models/paywall_query_update_diagnostic.dart';
 import '../../web_paywall/models/web_paywall_package.dart';
-import '../../web_paywall/services/paywall_logging.dart';
 import 'paywall_query_retry.dart';
 import '../../paywall_renderer/models/paywall_catalog.dart';
 import '../../web_paywall/models/web_paywall_configuration.dart';
@@ -18,6 +19,8 @@ import 'paywall_configuration_source.dart';
 import 'paywall_query_response.dart';
 import 'paywall_query_attribution.dart';
 import 'paywall_query_snapshots.dart';
+import 'paywall_query_archive_batch.dart';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 import 'paywall_storage.dart';
 import 'paywall_package_archive.dart';
 import 'paywall_local_package_store.dart';
@@ -28,6 +31,7 @@ part 'paywall_query_update.dart';
 
 /// 相同查询域共用一次启动任务；各 Client 仍持有自己的兜底授权和网页。
 class PaywallQueryRuntime {
+  final String _diagnosticID = Object().hashCode.toRadixString(16);
   PaywallQueryRuntime._(this.configuration, this.catalog, this.storage) {
     attribution = PaywallQueryAttribution(
         storage: storage, namespace: configuration.cacheScope);
@@ -82,6 +86,12 @@ class PaywallQueryRuntime {
     client.queryUpdate = waitForUpdate;
     client.queryPlacementNames = config.placements.values.toSet();
     client.queryRestore = restore;
+    client.queryRestorePlacement = restorePlacement;
+    client.queryRestorePrepared =
+        (name, preparation) => restorePlacement(name, preparation: preparation);
+    client.queryResolvePrepared = (name, presentation, preparation) => resolve(
+        name, client,
+        presentation: presentation, preparation: preparation);
     client.queryResolve = (name) => resolve(name, client);
     client.queryResolveForPresentation =
         (name) => resolve(name, client, presentation: true);
@@ -111,6 +121,9 @@ class PaywallQueryRuntime {
             fallbackPlacements: fallback.fallbackPlacements,
             archive: archive,
             bundled: () => archive.bundled(fallback.bundledAssetPath,
+                bundle: fallback.bundle),
+            bundledPrepared: (preparation) => archive.bundledForPreparation(
+                fallback.bundledAssetPath, preparation,
                 bundle: fallback.bundle)),
         history: PaywallHistoryStore(
             archive: PaywallPackageArchive(
@@ -136,27 +149,47 @@ class PaywallQueryRuntime {
   /// 恢复只访问磁盘；离线也能立即使用已经校验的完整包。
   Future<void> restore() => _restoring ??= _restore();
 
-  /// 冻结启动版本，后续后台更新不能覆盖这些内存选择。
+  /// 冻结启动版本；每个已校验点位立即唤醒等待者。
   Future<void> _restore() async {
-    final restored = await snapshots.restore();
+    await snapshots.restore(
+        preferredPlacement: () => _preferred, onPlacement: _publishRestored);
     if (_disposed) throw PaywallFailure.cancelled;
-    _active.addAll(restored);
-    _launch.addAll(restored);
-    _trace('query.cache_restored', 'count=${restored.length}');
   }
 
-  /// 已有任意缓存即可结束预备；无缓存等待首个完整点位或任务结束。
+  /// 同一点位多入口恢复只发布一次，后台结果不能替换启动快照。
+  void _publishRestored(PaywallPlacement value) {
+    if (_disposed || _active.containsKey(value.name)) return;
+    _active[value.name] = value;
+    _launch[value.name] = value;
+    _trace('query.cache_restored', 'placement=${value.name}');
+    _progress.add(null);
+  }
+
+  /// 本地入口只等自己的校验；其余快照继续恢复，不触发网络查询。
+  Future<void> restorePlacement(String name,
+      {WebPaywallResourcePreparation? preparation}) async {
+    _preferred = name;
+    final value = await WebPaywallDiagnostics.measure(
+        configuration.runtimeEnvironment.name,
+        'snapshot.restore',
+        () => snapshots.restorePlacement(name, preparation: preparation),
+        detail: 'query=$_diagnosticID placement=$name');
+    if (_disposed) throw PaywallFailure.cancelled;
+    if (value != null) _publishRestored(value);
+    unawaited(restore().catchError((Object _) {}));
+  }
+
+  /// 首个完整缓存即可结束预备，剩余恢复与后台更新在共享任务中继续。
   Future<void> prepare() async {
-    await restore();
     _start();
     await _wait(null);
   }
 
   /// 可见入口只等待自己，关闭等待者不会中止共享后台更新。
   Future<PaywallPlacement?> resolve(String name, PaywallClient client,
-      {bool presentation = false}) async {
-    _preferred = name;
-    await restore();
+      {bool presentation = false,
+      WebPaywallResourcePreparation? preparation}) async {
+    await restorePlacement(name, preparation: preparation);
     _start();
     final timer = presentation
         ? Timer(const Duration(seconds: 3), () {
@@ -195,7 +228,6 @@ class PaywallQueryRuntime {
 
   /// 诊断和回归可等待本次静默更新完成，不产生额外请求。
   Future<void> waitForUpdate() async {
-    await restore();
     _start();
     await _query;
   }
@@ -230,9 +262,16 @@ class PaywallQueryRuntime {
 
   /// 首次请求条件只采集一次；迟到归因只写入下次启动的存储。
   Future<PaywallConfigurationRequest> _request() async {
-    await _online();
-    final channel = await attribution.resolve();
-    final env = await configuration.environment();
+    final environment = configuration.runtimeEnvironment.name;
+    await WebPaywallDiagnostics.measure(
+        environment, 'query.network_wait', _online,
+        detail: 'query=$_diagnosticID');
+    final channel = await WebPaywallDiagnostics.measure(
+        environment, 'query.attribution', attribution.resolve,
+        detail: 'query=$_diagnosticID');
+    final env = await WebPaywallDiagnostics.measure(
+        environment, 'query.environment', configuration.environment,
+        detail: 'query=$_diagnosticID');
     if (_disposed) throw PaywallFailure.cancelled;
     if (env.runtimeEnvironment != configuration.runtimeEnvironment)
       throw PaywallFailure.configuration;
@@ -245,18 +284,19 @@ class PaywallQueryRuntime {
 
   /// 合法信封先选择点位，完整包逐个提交，未命中只删除下次启动索引。
   Future<void> _update() async {
-    final request = await _request();
-    _source(configuration.cacheScope).validateRequest(request);
+    // 请求可以与磁盘恢复重叠；两者完成前不迁移、下载或提交任何新指针。
+    final requestTask = _prepareRequest();
+    final responseTask = _fetchUpdate(requestTask);
+    final results = await Future.wait<Object?>([restore(), requestTask]);
+    final request = results[1] as PaywallConfigurationRequest;
+    if (_disposed) return;
     // 先按当前请求身份迁移，迁移不允许下载或跨环境寻找旧资源。
     await _migrate(request);
-    final raw = await _retry(() async {
-      _trace('configuration.request', '${request.method} ${request.uri}');
-      return configuration.fetch?.call(request) ??
-          PaywallHttp.fetch(request.uri,
-              method: request.method, body: request.body);
-    }, 'configuration');
     if (_disposed) return;
-    _trace('configuration.response', raw);
+    final (raw, error, stack) = await responseTask;
+    if (_disposed) return;
+    if (error != null) Error.throwWithStackTrace(error, stack!);
+    final archiveBatch = PaywallQueryArchiveBatch();
     // 完整包增量提交；失败点位与明确未命中使用不同处理路径。
     final response = PaywallQueryResponse(
         placements: configuration.placements,
@@ -265,11 +305,15 @@ class PaywallQueryRuntime {
         allowedOrigins: configuration.allowedOrigins,
         catalog: catalog,
         developmentHTTPOrigin: configuration.developmentHTTPOrigin);
-    final unmatched = await response.load(raw, request,
+    final unmatched = await response.load(raw!, request,
         preferredPlacement: () => _preferred,
         onUnavailable: _markUnavailable,
         onFailure: () => _updateFailures++,
-        onPage: (name, doc, mode) => _acceptUpdate(name, doc, mode, request));
+        onPage: (name, doc, mode) =>
+            _acceptUpdate(name, doc, mode, request, batch: archiveBatch),
+        onPreparedPage: (name, doc, mode, resource) => _acceptUpdate(
+            name, doc, mode, request,
+            resource: resource, batch: archiveBatch));
     if (_disposed) return;
     // 删除只作用于磁盘索引，不撤换已经恢复的本次启动版本。
     try {
@@ -286,7 +330,9 @@ class PaywallQueryRuntime {
   /// 归档失败时仍可使用本次已校验资源，但不得替换旧持久指针。
   Future<bool> _accept(String name, WebPaywallDocument doc, String mode,
       PaywallConfigurationRequest request,
-      {String? configurationSnapshot,
+      {WebPaywallResourceLease? resource,
+      PaywallQueryArchiveBatch? batch,
+      String? configurationSnapshot,
       WebPaywallSessionPolicy? sessionPolicy}) async {
     if (_disposed) throw PaywallFailure.cancelled;
     var value = PaywallPlacement(
@@ -301,7 +347,8 @@ class PaywallQueryRuntime {
     var saved = true;
     // 持久化成功才移动下次启动指针，磁盘错误不影响本次已下载包。
     try {
-      value = await snapshots.save(value, () => !_disposed);
+      value = await snapshots.save(value, () => !_disposed,
+          resource: resource, batch: batch);
     } catch (error) {
       saved = false;
       _updateFailures++;
@@ -385,5 +432,7 @@ class PaywallQueryRuntime {
 
   /// 只记录版本和点位状态，不将静默更新结果弹给用户。
   void _trace(String event, String detail) => WebPaywallDiagnostics.log(
-      configuration.runtimeEnvironment.name, event, detail);
+      configuration.runtimeEnvironment.name,
+      event,
+      'query=$_diagnosticID $detail');
 }

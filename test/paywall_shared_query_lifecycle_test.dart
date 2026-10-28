@@ -145,7 +145,7 @@ void main() {
     expect(next.cachedPlacement('result')!.document.revision, 2);
   });
 
-  test('取消退避立即结束且不通知；日志关闭时保持静默', () async {
+  test('取消退避立即结束且不通知；关闭打印仍报告诊断结果', () async {
     final attempted = Completer<void>();
     final reports = <PaywallQueryUpdateDiagnostic>[];
     var attempts = 0;
@@ -166,7 +166,7 @@ void main() {
     final muted = client(() async => _response(1), diagnostic: reports.add);
     await ready(muted);
     await muted.waitForQueryUpdate();
-    expect(reports, isEmpty);
+    expect(reports, hasLength(1));
   });
 
   test('共享 Client 只提示一次，单包损坏统计失败而非更新', () async {

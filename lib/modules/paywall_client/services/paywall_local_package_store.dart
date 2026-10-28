@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
 import '../../web_paywall/models/web_paywall_document.dart';
 import '../../web_paywall/models/web_paywall_package.dart';
@@ -6,6 +7,7 @@ import '../models/paywall_failure.dart';
 import 'paywall_package_archive.dart';
 import 'paywall_storage.dart';
 import 'paywall_http.dart';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 
 /// 本地入口先选择已冻结更新包，再退内置包；打开页面从不等待网络。
 class PaywallLocalPackageStore {
@@ -14,6 +16,7 @@ class PaywallLocalPackageStore {
       required Set<String> fallbackPlacements,
       required this.archive,
       required this.bundled,
+      this.bundledPrepared,
       this.updateUrl,
       this.fetch,
       DateTime Function()? now})
@@ -23,6 +26,8 @@ class PaywallLocalPackageStore {
   final Set<String> fallbackPlacements;
   final PaywallPackageArchive archive;
   final Future<WebPaywallDocument> Function() bundled;
+  final Future<WebPaywallDocument> Function(WebPaywallResourcePreparation)?
+      bundledPrepared;
   final Uri? updateUrl;
   final Future<String> Function(Uri)? fetch;
   final DateTime Function() now;
@@ -44,10 +49,11 @@ class PaywallLocalPackageStore {
       if ((_state['highestVersion'] as int? ?? 0) < 0 ||
           (_state['policyVersion'] as int? ?? 0) < 0)
         throw PaywallFailure.configuration;
-      await archive.pruneOnOpen();
     } catch (_) {
       _state = {};
     }
+    // 清理不参与状态恢复；失败不能撤销已读取的关闭或拒绝策略。
+    unawaited(archive.pruneOnOpen().catchError((Object _) {}));
   }
 
   /// 点位关闭优先于所有资源与历史回退。
@@ -58,7 +64,8 @@ class PaywallLocalPackageStore {
 
   /// 更新包失效时依次选择前版与内置包，但不尝试临时下载。
   Future<({WebPaywallDocument document, String source})> selection(
-      {bool bundledOnly = false}) async {
+      {bool bundledOnly = false,
+      WebPaywallResourcePreparation? preparation}) async {
     await initialize();
     if (!bundledOnly) {
       for (final key in ['current', 'previous']) {
@@ -66,17 +73,30 @@ class PaywallLocalPackageStore {
         if (raw is! Map<String, dynamic> || _rejected.contains(raw['revision']))
           continue;
         try {
-          return (document: await archive.open(raw), source: 'update');
+          return (
+            document: await (preparation == null
+                ? archive.open(raw)
+                : archive.openForPreparation(raw, preparation)),
+            source: 'update'
+          );
         } catch (_) {
           await _rejectVersion(raw['revision'] as int);
         }
       }
     }
-    final value = await bundled();
+    final value = preparation != null && bundledPrepared != null
+        ? await bundledPrepared!(preparation)
+        : await bundled();
     // 内置资源与更新资源都通过完整清单和摘要校验。
     if (value.localDirectory == null) throw PaywallFailure.resource;
-    await archive.cache
-        .verifyDirectory(value.localDirectory!, value, archive.environment);
+    if (preparation == null) {
+      await archive.cache
+          .verifyDirectory(value.localDirectory!, value, archive.environment);
+    } else {
+      await preparation.verifyIfNeeded(
+          value.localDirectory!, value, archive.environment,
+          cache: archive.cache);
+    }
     return (document: value, source: 'bundled');
   }
 

@@ -3,6 +3,7 @@ import '../../web_paywall/models/web_paywall_document.dart';
 import '../../web_paywall/models/web_paywall_package.dart';
 import 'paywall_package_archive.dart';
 import 'paywall_storage.dart';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 
 /// 每个请求、环境、入口和页面只保留最近两个首屏成功版本的索引。
 class PaywallHistoryStore {
@@ -51,7 +52,8 @@ class PaywallHistoryStore {
   Future<({WebPaywallDocument document, String configuration})?> previous(
       {required String requestIdentity,
       required String placement,
-      required WebPaywallDocument current}) async {
+      required WebPaywallDocument current,
+      WebPaywallResourcePreparation? preparation}) async {
     await archive.pruneOnOpen();
     final records = await _records(
         await _index(requestIdentity, placement, current.documentId));
@@ -65,8 +67,11 @@ class PaywallHistoryStore {
     if (older.isEmpty) return null;
     final record = older.first;
     return (
-      document: await archive
-          .open(Map<String, dynamic>.from(record['document'] as Map)),
+      document: await (preparation == null
+          ? archive.open(Map<String, dynamic>.from(record['document'] as Map))
+          : archive.openForPreparation(
+              Map<String, dynamic>.from(record['document'] as Map),
+              preparation)),
       configuration: record['configuration'] as String
     );
   }

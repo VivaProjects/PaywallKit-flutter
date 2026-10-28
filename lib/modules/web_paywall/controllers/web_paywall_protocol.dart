@@ -141,13 +141,9 @@ extension WebPaywallProtocol on WebPaywallController {
   /// 页面商品请求通过校验后查询商店，完成后只注入一次。
   Future<void> _loadProducts() async {
     trace("products.start", "requested=${_requestedProductRefs?.length ?? 0}");
-    _productsLoading = true;
+    _setProductsLoading(true);
     try {
-      if (_supportsDeferredProducts) await _bootstrapIfPossible();
-      final query = bridge.products(_requestedProductRefs!, storefrontGroup);
-      final values = await (_supportsDeferredProducts
-          ? query.timeout(const Duration(seconds: 12))
-          : query);
+      final values = await _queryProductsWithBootstrap();
       if (!_active) return;
       _productsLoaded = true;
       _products.clear();
@@ -174,8 +170,24 @@ extension WebPaywallProtocol on WebPaywallController {
       trace("products.failed", "error=${error.runtimeType}");
       _fail("products_query");
     } finally {
-      _productsLoading = false;
+      _setProductsLoading(false);
     }
+  }
+
+  /// 商店查询与空商品桥消息并行，完整报价只能在 bootstrap 完成后交付。
+  Future<List<PaywallStoreProduct>> _queryProductsWithBootstrap() async {
+    if (!_supportsDeferredProducts) {
+      return bridge.products(_requestedProductRefs!, storefrontGroup);
+    }
+    // 立即安装错误处理，查询即使同步抛错也不会产生无人接收的 Future。
+    final query = Future<List<PaywallStoreProduct>>.sync(
+            () => bridge.products(_requestedProductRefs!, storefrontGroup))
+        .timeout(const Duration(seconds: 12));
+    final results = await Future.wait<List<PaywallStoreProduct>>([
+      _bootstrapIfPossible().then((_) => <PaywallStoreProduct>[]),
+      query,
+    ], eagerError: true);
+    return results[1];
   }
 
   /// 桥与商品同时就绪才注入，重复 ready 不会重复查询或重置交易状态。

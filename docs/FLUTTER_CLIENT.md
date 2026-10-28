@@ -133,7 +133,7 @@ await presenter.present(
 
 ## 本次同步新增接口与行为
 
-- `PaywallLogging.mode = PaywallLoggingMode.enabled` 可在 production 开启日志；`automatic` 仅 test 输出，`disabled` 全部关闭。设置作用于当前 Dart isolate，不改变任何业务环境。开启时会输出配置请求和响应正文。
+SDK 默认独立保存日志，`PaywallLogging.printsToConsole` 默认为 `false`，只控制控制台打印。关闭打印仍可调用 `read()` / `export()`，`clear()` 清理现存日志。旧模式 `enabled` 打印，`automatic` / `disabled` 不打印，均保留记录和更新诊断回调。不改变业务环境，也不记录原始配置请求和响应正文。容量和真机采集方法见 [耗时诊断](LOAD_TIMING.md)。
 - 交易桥可额外 `implements PaywallStoreActionPolicy`，实现 `requiresStoreProducts` 与 `allowsStoreActions`。旧桥默认均为 true。允许空商品展示与允许交易独立；拒绝购买/恢复也向 H5 返回 failed，解除等待态。
 - `ready` 事件的 `productRefs` 为经过校验的 H5 请求列表，保留顺序及商店未返回项；旧页没有显式 `productsRequest` 时为空。底层通过 `WebPaywallController.requestedProductRefs` 读取。
 - 页面同时声明 `productRequest`、`renderReady`、`deferredProducts` 时先接收空商品 bootstrap，真实商品通过同会话 `productsUpdated` 补齐。商品查询仍有 12 秒上限；缺商品不可购买。旧页面仍等待商品后 bootstrap。

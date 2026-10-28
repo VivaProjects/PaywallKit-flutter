@@ -12,6 +12,7 @@ class WebPaywallResourceLease {
   final Directory directory;
   final void Function() _release;
   bool _released = false;
+  bool get isReleased => _released;
   String get pagePath => '${directory.path}/offline.html';
 
   /// 重复关闭无副作用，清理工作由资源仓库负责。

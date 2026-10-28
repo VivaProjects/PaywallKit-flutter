@@ -7,7 +7,7 @@ extension WebPaywallCachedProducts on WebPaywallController {
     final currentBridge = bridge;
     final refs = _requestedProductRefs;
     if (!_active || refs == null || _productsLoading) return false;
-    _productsLoading = true;
+    _setProductsLoading(true);
     var unchanged = false;
     try {
       final values = await currentBridge.products(refs, storefrontGroup);
@@ -29,12 +29,12 @@ extension WebPaywallCachedProducts on WebPaywallController {
     } finally {
       // 变化时继续阻断旧价格购买，直到 Flow 销毁旧表面。
       if (_active && identical(bridge, currentBridge) && unchanged) {
-        _productsLoading = false;
+        _setProductsLoading(false);
       }
     }
   }
 
-  /// 按页面请求顺序比较所有展示字段，忽略商店返回顺序差异。
+  /// 比较真实交易身份与完整报价；名称由 H5 管理，不参与报价失效判断。
   String _quoteIdentity(
           List<String> refs, Map<String, PaywallStoreProduct> products) =>
       jsonEncode([
@@ -43,7 +43,6 @@ extension WebPaywallCachedProducts on WebPaywallController {
             [
               product.productRef,
               product.storeProductId,
-              product.title,
               product.displayPrice,
               product.disclosure,
               product.periodText,

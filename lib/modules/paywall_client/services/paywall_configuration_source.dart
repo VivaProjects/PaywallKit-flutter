@@ -70,15 +70,17 @@ class PaywallConfigurationSource {
             catalogs: catalogSnapshot,
             developmentHTTPOrigin: developmentOrigin(request));
     try {
-      WebPaywallDiagnostics.log(
-          request.environment.runtimeEnvironment.name,
-          'configuration.request',
-          '${request.method} ${request.uri} ${request.body ?? ""}');
-      final response = await (fetch?.call(request) ??
-          PaywallHttp.fetch(request.uri,
-              method: request.method, body: request.body));
       WebPaywallDiagnostics.log(request.environment.runtimeEnvironment.name,
-          'configuration.response', response);
+          'configuration.request', 'method=${request.method}');
+      final response = await WebPaywallDiagnostics.measure(
+          request.environment.runtimeEnvironment.name,
+          'configuration.fetch',
+          () =>
+              fetch?.call(request) ??
+              PaywallHttp.fetch(request.uri,
+                  method: request.method, body: request.body));
+      WebPaywallDiagnostics.log(request.environment.runtimeEnvironment.name,
+          'configuration.response', 'bytes=${utf8.encode(response).length}');
       final raw =
           transform == null ? response : await transform!(response, request);
       _checkCurrent(isCurrent);

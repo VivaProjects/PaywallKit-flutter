@@ -13,6 +13,7 @@ import '../../paywall_renderer/services/paywall_purchase_bridge.dart';
 import '../models/web_paywall_document.dart';
 import '../models/web_paywall_resource_lease.dart';
 import '../services/web_paywall_resource_cache.dart';
+import '../services/web_paywall_resource_preparation.dart';
 import '../models/web_paywall_environment.dart';
 import '../models/web_paywall_custom.dart';
 import '../models/web_paywall_session_identity.dart';
@@ -42,6 +43,7 @@ class WebPaywallController {
       required this.allowsDismiss,
       required this.dismiss,
       required this.openLegal,
+      this.resourcePreparation,
       WebPaywallResourceCache? resourceCache})
       : resourceCache = resourceCache ?? WebPaywallResourceCache.shared,
         custom = freezeWebPaywallCustom(custom) {
@@ -54,6 +56,7 @@ class WebPaywallController {
   }
 
   final WebPaywallResourceCache resourceCache;
+  final WebPaywallResourcePreparation? resourcePreparation;
   WebPaywallResourceLease? _resourceLease;
   Uri? _loadedPage;
   final WebPaywallDocument document;
@@ -95,6 +98,7 @@ class WebPaywallController {
   final contentHeight = ValueNotifier<double?>(null);
   bool _attached = false;
   bool _productsLoading = false;
+  final _productState = ValueNotifier(0);
   bool allowsDismiss;
   void Function() dismiss;
   void Function(String) openLegal;
@@ -160,6 +164,41 @@ class WebPaywallController {
     unawaited(_sendPresentationState());
     _beginPresentationDeadline();
     _notifyPresentation();
+  }
+
+  /// 预热接管通过状态通知等待商品结束；取消、失败或超时均解除监听。
+  Future<bool> waitForProducts(
+      {required Future<void> cancelled, required Duration timeout}) async {
+    if (!_active) return false;
+    if (!_productsLoading) return true;
+    final completed = Completer<bool>();
+    void finish(bool value) {
+      if (!completed.isCompleted) completed.complete(value);
+    }
+
+    void changed() {
+      if (!_active)
+        finish(false);
+      else if (!_productsLoading) finish(true);
+    }
+
+    _productState.addListener(changed);
+    final timer = Timer(timeout, () => finish(false));
+    unawaited(cancelled.then((_) => finish(false)));
+    try {
+      changed();
+      return await completed.future;
+    } finally {
+      timer.cancel();
+      if (!_disposed) _productState.removeListener(changed);
+    }
+  }
+
+  /// 商品状态变化仅通知本会话，销毁后的迟到查询不能写入已释放的监听器。
+  void _setProductsLoading(bool value) {
+    if (_productsLoading == value) return;
+    _productsLoading = value;
+    if (!_disposed) _productState.value++;
   }
 
   bool get awaitingProducts => _productsLoading;
@@ -251,8 +290,34 @@ class WebPaywallController {
         Timer(const Duration(seconds: 12), () => _fail("render_timeout"));
   }
 
-  /// 等桥接配置完成后才开始导航，防止页面 ready 早于通道注册。
+  /// 资源准备与桥配置并行；两者均完成后才导航，失败或销毁时归还晚到租约。
   Future<void> _initializeWebView() async {
+    WebPaywallResourceLease? lease;
+    try {
+      await Future.wait<void>([
+        WebPaywallDiagnostics.measure(environment.runtimeEnvironment.name,
+            'webview.configure', _configureWebView,
+            detail: 'session=$_sessionID'),
+        WebPaywallDiagnostics.measure(environment.runtimeEnvironment.name,
+                'webview.resource', _prepareResource,
+                detail: 'session=$_sessionID')
+            .then((value) {
+          lease = value;
+        }),
+      ]);
+      if (!_active) return;
+      await _loadPage(lease);
+      lease = null;
+    } catch (_) {
+      _fail();
+    } finally {
+      // 配置失败、超时和卸载均不能泄漏已取得或稍后取得的资源租约。
+      lease?.release();
+    }
+  }
+
+  /// 保持桥通道、导航代理和交互策略在首次导航前注册完成。
+  Future<void> _configureWebView() async {
     try {
       await webView.setJavaScriptMode(JavaScriptMode.unrestricted);
       if (!_active) return;
@@ -266,6 +331,7 @@ class WebPaywallController {
           if (_bridgeReady) _fail("unexpected_navigation");
         },
         onPageFinished: (_) {
+          trace('navigation.finished');
           if (_active)
             unawaited(webView
                 .runJavaScript(WebPaywallInteractionPolicy.script)
@@ -285,31 +351,42 @@ class WebPaywallController {
       }
       await WebPaywallInteractionPolicy.install(webView);
       if (!_active) return;
-      await _loadPage();
     } catch (_) {
       _fail();
+      rethrow;
     }
   }
 
   /// 普通展示与预加载共享持久资源准备，失败仅回到当前远端页。
-  Future<void> _loadPage() async {
+  Future<WebPaywallResourceLease?> _prepareResource() async {
     WebPaywallResourceLease? lease;
     try {
-      lease = await resourceCache.prepare(
+      lease = resourcePreparation?.take(
+          document, environment.runtimeEnvironment.name);
+      lease ??= await resourceCache.prepare(
           document, environment.runtimeEnvironment.name);
     } catch (_) {
       trace("resource.fallback", "source=remote");
       // 本地包失败不能转回远端下载，否则失去离线兜底语义。
       if (document.localDirectory != null) {
         _fail('resource');
-        return;
+        return null;
       }
       // 没有清单的旧发布仍然可以通过远端页面加载。
+    } finally {
+      resourcePreparation?.close();
     }
+    // 资源先完成时立即交给会话持有，桥配置挂起期间卸载也能及时释放。
     if (!_active) {
       lease?.release();
-      return;
+      return null;
     }
+    _resourceLease = lease;
+    return lease;
+  }
+
+  /// 桥配置和资源准备完成后才开始导航；租约所有权交给当前会话。
+  Future<void> _loadPage(WebPaywallResourceLease? lease) async {
     trace("page.load", "source=${lease == null ? 'remote' : 'disk'}");
     onResourceSource?.call(document.localDirectory != null
         ? 'local'
@@ -337,12 +414,14 @@ class WebPaywallController {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    resourcePreparation?.close();
     releaseSurface?.call();
     releaseSurface = null;
     _stop();
     contentHeight.dispose();
     failed.dispose();
     ready.dispose();
+    _productState.dispose();
   }
 
   bool _disposed = false;
@@ -353,6 +432,7 @@ class WebPaywallController {
     _resourceLease?.release();
     _resourceLease = null;
     _active = false;
+    _productState.value++;
     _readyTimer?.cancel();
     if (!_started) return;
     // 当前插件没有原生 stopLoading；尽力停止文档，实际隔离由 _active 保证。

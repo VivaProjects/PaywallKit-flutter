@@ -25,7 +25,7 @@ void main() {
   test('logging override is independent from runtime environment', () {
     addTearDown(() => PaywallLogging.mode = PaywallLoggingMode.automatic);
     PaywallLogging.mode = PaywallLoggingMode.automatic;
-    expect(PaywallLogging.isEnabled('test'), isTrue);
+    expect(PaywallLogging.isEnabled('test'), isFalse);
     expect(PaywallLogging.isEnabled('production'), isFalse);
     PaywallLogging.mode = PaywallLoggingMode.enabled;
     expect(PaywallLogging.isEnabled('production'), isTrue);
@@ -144,6 +144,20 @@ void main() {
       expect(platform.controller.messages.last['visible'], isTrue);
       expect(controller.requestedProductRefs, ['compare', 'annual']);
       expect(await controller.validateRetainedProducts(), isTrue);
+      // 原生名称不注入 H5，名称变化不能销毁已渲染页面或改变购买门禁。
+      final original = (await bridge.productsResult.future).single;
+      bridge.refreshedProducts = [
+        PaywallStoreProduct(
+          productRef: original.productRef,
+          storeProductId: original.storeProductId,
+          title: 'Updated native title',
+          displayPrice: original.displayPrice,
+          disclosure: original.disclosure,
+          subscriptionPricing: original.subscriptionPricing,
+        )
+      ];
+      expect(await controller.validateRetainedProducts(), isTrue);
+      expect(controller.ready.value, isTrue);
       // 旧展示字段不变，仅结构化周期变化也必须阻止旧报价复用。
       bridge.refreshedProducts = [
         PaywallStoreProduct(

@@ -6,6 +6,7 @@ import '../../paywall_renderer/models/paywall_catalog.dart';
 import 'paywall_query_runtime.dart';
 import 'paywall_storage.dart';
 import 'dart:async';
+import '../../web_paywall/services/web_paywall_resource_preparation.dart';
 import '../../web_paywall/models/web_paywall_environment.dart';
 import '../models/paywall_failure.dart';
 import 'paywall_local_package_store.dart';
@@ -40,9 +41,25 @@ class PaywallClient {
   bool get usesLaunchSnapshot => queryResolve != null;
 
   Future<void> Function()? queryPrepare, queryRestore, queryUpdate;
+  Future<void> Function(String)? queryRestorePlacement;
   Set<String> queryPlacementNames = {};
   Future<PaywallPlacement?> Function(String)? queryResolve;
   Future<PaywallPlacement?> Function(String)? queryResolveForPresentation;
+  Future<PaywallPlacement?> Function(
+      String, bool, WebPaywallResourcePreparation)? queryResolvePrepared;
+  Future<void> Function(String, WebPaywallResourcePreparation)?
+      queryRestorePrepared;
+
+  /// 显式传递本次加载所有者；只有新发生的校验可以生成一次性交接。
+  Future<PaywallPlacement?> resolvePrepared(String placement, bool presentation,
+      WebPaywallResourcePreparation? preparation) {
+    if (preparation != null && queryResolvePrepared != null) {
+      return queryResolvePrepared!(placement, presentation, preparation);
+    }
+    return presentation
+        ? resolveForPresentation(placement)
+        : resolve(placement);
+  }
 
   /// 展示入口等待最多三秒，预加载仍可等待完整后台准备。
   Future<PaywallPlacement?> resolveForPresentation(String placement) =>
@@ -55,8 +72,19 @@ class PaywallClient {
   }
 
   /// 本地入口只恢复磁盘快照，不等待联网。
-  Future<void> restoreQuery() async {
-    await queryRestore?.call();
+  Future<void> restoreQuery(
+      {String? placement, WebPaywallResourcePreparation? preparation}) async {
+    if (placement != null &&
+        preparation != null &&
+        queryRestorePrepared != null) {
+      await queryRestorePrepared!(placement, preparation);
+      return;
+    }
+    if (placement != null && queryRestorePlacement != null) {
+      await queryRestorePlacement!(placement);
+    } else {
+      await queryRestore?.call();
+    }
   }
 
   /// 宿主仅转交归因 SDK 的结果，等待和持久化由 SDK 管理。
@@ -189,12 +217,14 @@ class PaywallClient {
   }
 
   /// 历史选择仍使用当前来源和目录复验，防止旧配置越权或跨请求使用。
-  Future<PaywallPlacement?> previousPlacement(PaywallPlacement current) async {
+  Future<PaywallPlacement?> previousPlacement(PaywallPlacement current,
+      {WebPaywallResourcePreparation? preparation}) async {
     if (history == null || current.requestIdentity == null) return null;
     final value = await history!.previous(
         requestIdentity: current.requestIdentity!,
         placement: current.name,
-        current: current.document);
+        current: current.document,
+        preparation: preparation);
     if (value == null) return null;
     if (isPlacementDisabled(current.name)) throw PaywallFailure.disabled;
     final config = WebPaywallConfiguration.parse(value.configuration,
