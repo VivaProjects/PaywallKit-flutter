@@ -33,6 +33,7 @@ part 'paywall_query_update.dart';
 class PaywallQueryRuntime {
   final String _diagnosticID = Object().hashCode.toRadixString(16);
   PaywallQueryRuntime._(this.configuration, this.catalog, this.storage) {
+    _remoteUpdatesEnabled = configuration.remoteUpdatesEnabled;
     attribution = PaywallQueryAttribution(
         storage: storage, namespace: configuration.cacheScope);
     snapshots = PaywallQuerySnapshots(configuration, catalog, storage,
@@ -54,6 +55,7 @@ class PaywallQueryRuntime {
   final _cancelled = Completer<void>();
   Future<void>? _restoring, _query;
   bool _finished = false, _disposed = false;
+  late bool _remoteUpdatesEnabled;
   Object? _failure;
   String? _preferred;
 
@@ -64,7 +66,7 @@ class PaywallQueryRuntime {
       PaywallStorage? storage,
       Set<String> retainedPlacements = const {}}) {
     final key =
-        '${configuration.cacheScope}|${configuration.endpoint}|${PaywallStorage.digest(configuration.placements)}|${PaywallStorage.digest(configuration.allowedOrigins == null ? 'unrestricted' : (configuration.allowedOrigins!.toList()..sort()))}|${configuration.developmentHTTPOrigin}';
+        '${configuration.cacheScope}|${configuration.endpoint}|${PaywallStorage.digest(configuration.placements)}|${PaywallStorage.digest(configuration.allowedOrigins == null ? 'unrestricted' : (configuration.allowedOrigins!.toList()..sort()))}|${configuration.developmentHTTPOrigin}|remoteUpdates=${configuration.remoteUpdatesEnabled}';
     final runtime = _sessions.putIfAbsent(
         key,
         () => PaywallQueryRuntime._(
@@ -83,6 +85,8 @@ class PaywallQueryRuntime {
     client.environmentProvider = config.environment;
     client.attributionReporter = attribution.update;
     client.queryPrepare = prepare;
+    client.queryEnableRemoteUpdates = enableRemoteUpdates;
+    client.queryRemoteUpdatesEnabled = () => _remoteUpdatesEnabled;
     client.queryUpdate = waitForUpdate;
     client.queryPlacementNames = config.placements.values.toSet();
     client.queryRestore = restore;
@@ -181,6 +185,10 @@ class PaywallQueryRuntime {
 
   /// 首个完整缓存即可结束预备，剩余恢复与后台更新在共享任务中继续。
   Future<void> prepare() async {
+    if (!_remoteUpdatesEnabled) {
+      await restore();
+      return;
+    }
     _start();
     await _wait(null);
   }
@@ -189,7 +197,9 @@ class PaywallQueryRuntime {
   Future<PaywallPlacement?> resolve(String name, PaywallClient client,
       {bool presentation = false,
       WebPaywallResourcePreparation? preparation}) async {
+    final shouldUpdate = _remoteUpdatesEnabled;
     await restorePlacement(name, preparation: preparation);
+    if (!shouldUpdate) return _bind(_active[name], client);
     _start();
     final timer = presentation
         ? Timer(const Duration(seconds: 3), () {
@@ -228,13 +238,21 @@ class PaywallQueryRuntime {
 
   /// 诊断和回归可等待本次静默更新完成，不产生额外请求。
   Future<void> waitForUpdate() async {
+    if (!_remoteUpdatesEnabled) return;
     _start();
     await _query;
   }
 
+  /// 同一共享查询域首次授权后启动唯一更新，不撤换已有点位或网页。
+  void enableRemoteUpdates() {
+    if (_disposed) return;
+    _remoteUpdatesEnabled = true;
+    _start();
+  }
+
   /// 成功或失败都保留唯一任务，恢复前台和迟到归因不会重新查询。
   void _start() {
-    if (_query != null || _disposed) return;
+    if (!_remoteUpdatesEnabled || _query != null || _disposed) return;
     _query = _update().catchError((Object error) {
       _failure = error;
       _trace('query.update_failed', '${error.runtimeType}');
@@ -262,6 +280,7 @@ class PaywallQueryRuntime {
 
   /// 首次请求条件只采集一次；迟到归因只写入下次启动的存储。
   Future<PaywallConfigurationRequest> _request() async {
+    if (!_remoteUpdatesEnabled) throw PaywallFailure.configuration;
     final environment = configuration.runtimeEnvironment.name;
     await WebPaywallDiagnostics.measure(
         environment, 'query.network_wait', _online,

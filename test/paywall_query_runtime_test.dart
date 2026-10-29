@@ -32,6 +32,7 @@ void main() {
             var country = 'USA';
             final client = PaywallClient.query(
                 query: PaywallQueryConfiguration(
+                    remoteUpdatesEnabled: true,
                     endpoint: Uri.parse('$origin/query'),
                     cacheNamespace: 'app',
                     allowedOrigins: {origin},
@@ -80,6 +81,7 @@ void main() {
     final entered = Completer<void>(), online = Completer<void>();
     final client = PaywallClient.query(
         query: PaywallQueryConfiguration(
+            remoteUpdatesEnabled: true,
             endpoint: Uri.parse('https://example.com/query'),
             cacheNamespace: 'offline',
             allowedOrigins: {'https://example.com'},

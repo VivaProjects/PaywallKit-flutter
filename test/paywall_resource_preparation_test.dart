@@ -48,6 +48,7 @@ void main() {
       'fresh snapshot hands validation to WebView; next presentation verifies again',
       () async {
     final config = PaywallQueryConfiguration(
+        remoteUpdatesEnabled: true,
         endpoint: Uri.parse('https://example.com/query'),
         cacheNamespace: root.path,
         placements: {'entry': 'settings'},

@@ -45,6 +45,7 @@ void main() {
     final catalog =
         PaywallCatalog(productRefs: ['product'], recommendedRef: 'product');
     final configuration = PaywallQueryConfiguration(
+        remoteUpdatesEnabled: true,
         endpoint: Uri.parse('https://example.com/query'),
         cacheNamespace: 'restore-order',
         allowedOrigins: {'https://example.com'},

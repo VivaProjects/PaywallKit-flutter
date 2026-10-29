@@ -16,6 +16,7 @@ class PaywallQueryConfiguration {
       Future<WebPaywallEnvironment> Function()? environment,
       this.runtimeEnvironment = WebPaywallRuntimeEnvironment.test,
       this.fallback,
+      this.remoteUpdatesEnabled = false,
       this.developmentHTTPOrigin,
       this.waitUntilNetworkAvailable,
       this.waitUntilNetworkAvailableCancellable,
@@ -24,9 +25,11 @@ class PaywallQueryConfiguration {
       this.packageLoader,
       this.legacyCacheNamespaces = const [],
       Stream<String>? storefrontChanges})
-      : environment = environment ??
-            (() => PaywallEnvironmentProvider.capture(
-                runtimeEnvironment: runtimeEnvironment)),
+      : environment = environment == null
+            ? (() => PaywallEnvironmentProvider.capture(
+                runtimeEnvironment: runtimeEnvironment))
+            : (() async => PaywallEnvironmentProvider.cacheEnvironment(
+                await environment())),
         storefrontChanges =
             storefrontChanges ?? PaywallEnvironmentProvider.storefrontChanges,
         allowedOrigins =
@@ -47,6 +50,9 @@ class PaywallQueryConfiguration {
   /// 可注入传输和完整包加载器，便于离线验证协议及启动缓存。
   final Future<String> Function(PaywallConfigurationRequest)? fetch;
   final WebPaywallPackageLoader? packageLoader;
+
+  /// 默认关闭，仅使用完整缓存或内置包；宿主可调用 Client.enableRemoteUpdates() 开启。
+  final bool remoteUpdatesEnabled;
   final Uri endpoint;
   final String cacheNamespace;
   final Set<String>? allowedOrigins;

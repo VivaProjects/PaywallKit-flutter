@@ -21,6 +21,17 @@ public final class PaywallResourcesPlugin: NSObject, FlutterPlugin, FlutterStrea
 
     /// 国家仅由 StoreKit 账户提供；低版本无法获取时保留空字符串。
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        if call.method == "resolveCountry" {
+            let arguments = call.arguments as? [String: Any] ?? [:]
+            let environment = arguments["runtimeEnvironment"] as? String ?? "test"
+            guard ["test", "production"].contains(environment) else {
+                result(FlutterError(code: "environment", message: "Invalid runtime environment", details: nil))
+                return
+            }
+            result(PaywallStoreCountryCache.resolve(
+                arguments["country"] as? String ?? "", environment: environment))
+            return
+        }
         if call.method == "disableLongPress" {
             guard let args = call.arguments as? [String: Any],
                   let identifier = args["identifier"] as? NSNumber,

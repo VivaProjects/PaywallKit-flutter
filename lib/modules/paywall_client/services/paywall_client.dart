@@ -40,6 +40,19 @@ class PaywallClient {
   /// 查询快照准备独立于商品和首屏计时，保留共享运行时实现。
   bool get usesLaunchSnapshot => queryResolve != null;
 
+  void Function()? queryEnableRemoteUpdates;
+  bool Function()? queryRemoteUpdatesEnabled;
+
+  /// 查询域当前授权状态；已释放 Client 不再参与后台更新。
+  bool get remoteUpdatesEnabled =>
+      !_disposed && (queryRemoteUpdatesEnabled?.call() ?? false);
+
+  /// 宿主明确获取到 true 后单向开启；重复调用不重查或清除当前 H5。
+  void enableRemoteUpdates() {
+    if (_disposed) return;
+    queryEnableRemoteUpdates?.call();
+  }
+
   Future<void> Function()? queryPrepare, queryRestore, queryUpdate;
   Future<void> Function(String)? queryRestorePlacement;
   Set<String> queryPlacementNames = {};

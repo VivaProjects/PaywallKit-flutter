@@ -34,7 +34,9 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(
         const MethodChannel('native_paywall/resources'),
-        (_) async => resources.path);
+        (call) async => call.method == 'resolveCountry'
+            ? (call.arguments as Map)['country']
+            : resources.path);
     const env = WebPaywallEnvironment(
         os: 'iOS',
         language: 'en',
@@ -46,6 +48,7 @@ void main() {
     final storage = PaywallStorage(directory: () async => root);
     final entered = Completer<void>(), response = Completer<String>();
     final configuration = PaywallQueryConfiguration(
+        remoteUpdatesEnabled: true,
         endpoint: Uri.parse('https://example.com/query'),
         cacheNamespace: 'legacy-overlap',
         placements: {'entry': 'settings'},
@@ -119,6 +122,7 @@ void main() {
     final fetched = Completer<void>();
     var requests = 0;
     final configuration = PaywallQueryConfiguration(
+        remoteUpdatesEnabled: true,
         endpoint: Uri.parse('https://example.com/query'),
         cacheNamespace: 'overlap',
         placements: {'entry': 'settings'},

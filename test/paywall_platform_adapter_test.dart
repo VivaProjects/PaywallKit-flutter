@@ -15,6 +15,9 @@ void main() {
       () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'resolveCountry') {
+        return (call.arguments as Map)['country'];
+      }
       if (call.method == 'environment')
         return {
           'os': 'iOS',
@@ -66,6 +69,57 @@ void main() {
                 storefrontCountry: () async => 'USA'))
             .country,
         'USA');
+  });
+
+  test(
+      'country failure reuses last success without retry or environment mixing',
+      () async {
+    final countries = <String, String>{};
+    var queries = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'environment') {
+        return {
+          'os': 'Android',
+          'isPad': false,
+          'country': '',
+          'language': 'en',
+          'deviceModel': 'model',
+          'appVersion': '1'
+        };
+      }
+      if (call.method == 'resolveCountry') {
+        final args = call.arguments as Map;
+        final scope = args['runtimeEnvironment'] as String;
+        final country = args['country'] as String;
+        if (country.isNotEmpty) countries[scope] = country;
+        return countries[scope] ?? '';
+      }
+      throw MissingPluginException();
+    });
+    Future<WebPaywallEnvironment> capture(String? result,
+            {WebPaywallRuntimeEnvironment environment =
+                WebPaywallRuntimeEnvironment.test}) =>
+        PaywallEnvironmentProvider.capture(
+            runtimeEnvironment: environment,
+            storefrontCountry: () async {
+              queries++;
+              if (result == null) throw StateError('store unavailable');
+              return result;
+            });
+
+    expect((await capture('')).country, '');
+    expect((await capture('usa')).country, 'USA');
+    expect((await capture(null)).country, 'USA');
+    expect((await capture('')).country, 'USA');
+    expect(
+        (await capture('',
+                environment: WebPaywallRuntimeEnvironment.production))
+            .country,
+        '');
+    expect((await capture('CAN')).country, 'CAN');
+    expect((await capture(null)).country, 'CAN');
+    expect(queries, 7);
   });
 
   test(

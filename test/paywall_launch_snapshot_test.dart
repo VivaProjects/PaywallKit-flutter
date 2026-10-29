@@ -26,7 +26,9 @@ void main() {
                 .instance.defaultBinaryMessenger;
             channel.setMockMethodCallHandler(
                 const MethodChannel('native_paywall/resources'),
-                (call) async => root.path);
+                (call) async => call.method == 'resolveCountry'
+                    ? (call.arguments as Map)['country']
+                    : root.path);
             final subscription = server.listen((request) async {
               if (request.uri.path == '/query') {
                 queries++;
@@ -73,6 +75,7 @@ void main() {
             Future<PaywallClient> create({String version = '1'}) async {
               final client = PaywallClient.query(
                   query: PaywallQueryConfiguration(
+                      remoteUpdatesEnabled: true,
                       endpoint: Uri.parse('$origin/query'),
                       cacheNamespace: 'snapshot',
                       allowedOrigins: {origin},

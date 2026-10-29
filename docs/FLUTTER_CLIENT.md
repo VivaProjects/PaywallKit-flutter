@@ -2,7 +2,7 @@
 
 高层入口负责配置、归因、页面包、回退、预渲染、展示和会话生命周期。宿主仍负责真实购买、恢复、权益验证、业务资格和法律页面。H5 只展示 `content.json` 与商店报价，并发送桥接动作。
 
-本文描述 1.0.0 API；0.2.0 使用旧的 GetX API。迁移和所有权约定见 [框架独立性与迁移](FRAMEWORK_INDEPENDENCE.md)。
+本文描述 1.7.0 API；0.2.0 使用旧的 GetX API。迁移和所有权约定见 [框架独立性与迁移](FRAMEWORK_INDEPENDENCE.md)。
 
 ## Git 依赖
 
@@ -11,7 +11,7 @@ dependencies:
   native_paywall:
     git:
       url: git@github.com:VivaProjects/PaywallKit-flutter.git
-      ref: 1.2.0
+      ref: 1.7.0
 ```
 
 ## 查询与归因
@@ -36,8 +36,12 @@ final client = PaywallClient.query(
 
 // 第三方归因 SDK 的成功或失败回调仅转交此入口。
 await client.reportAttribution(channel: confirmedChannel, failed: false);
-await client.preloadConfiguration();
+await client.preloadConfiguration(); // 默认仅恢复本地缓存。
+// 宿主异步获取业务开关，只有明确为 true 才在原实例开启后台更新。
+if (isNormal) client.enableRemoteUpdates();
 ```
+
+远端更新默认关闭；开启不替换已展示 H5。有缓存沿用当前版本，后台新包下次冷启动生效；无缓存才按原入口等待/兜底。详见 [远端更新开关](CONFIGURATION_SOURCES.md#关闭远端更新保留本地-h5)。
 
 首次未知归因最多等待五秒；成功自然量保存为 `organic`，失败与超时的默认值不持久化。已确认渠道按宿主 namespace 和运行环境隔离保存。查询式 Client 生命周期内只发起一次请求（失败也不重试）；迟到归因持久化供下个 Client 使用，前台恢复和商店变化不触发刷新。渠道放在 `conditions.channel`，不再发送顶层 `channelKey`。
 

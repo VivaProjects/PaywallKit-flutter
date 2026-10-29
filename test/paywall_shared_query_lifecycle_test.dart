@@ -11,6 +11,7 @@ import 'package:native_paywall/native_paywall.dart';
 import 'package:native_paywall/modules/web_paywall/models/web_paywall_package.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
   late _Packages packages;
   late PaywallStorage storage;
@@ -33,11 +34,13 @@ void main() {
   /// 相同命名空间模拟同次进程，不同 Client 共享后台任务。
   PaywallClient client(
     Future<String> Function() fetch, {
+    bool remoteUpdatesEnabled = true,
     Future<void> Function(Future<void>)? online,
     void Function(PaywallQueryUpdateDiagnostic)? diagnostic,
   }) {
     final value = PaywallClient.query(
       query: PaywallQueryConfiguration(
+        remoteUpdatesEnabled: remoteUpdatesEnabled,
         endpoint: Uri.parse('https://example.com/query'),
         cacheNamespace: root.path,
         allowedOrigins: null,
@@ -58,6 +61,76 @@ void main() {
   /// 归因预先明确，回归不依赖真实 SDK 或计时器。
   Future<void> ready(PaywallClient value) =>
       value.reportAttribution(channel: 'organic');
+
+  test('默认关闭且本地解析不消耗首次更新，重复开启只请求一次', () async {
+    expect(
+        PaywallQueryConfiguration(
+          endpoint: Uri.parse('https://example.com/query'),
+          cacheNamespace: 'default',
+          allowedOrigins: null,
+          placements: {},
+        ).remoteUpdatesEnabled,
+        isFalse);
+    var requests = 0, waits = 0;
+    final gate = Completer<void>();
+    final value = client(
+        () async {
+          requests++;
+          await gate.future;
+          return _response(1);
+        },
+        remoteUpdatesEnabled: false,
+        online: (_) async {
+          waits++;
+        });
+    await ready(value);
+    final identity = value.identity;
+    await value.preloadConfiguration();
+    expect(await value.resolveForPresentation('settings'), isNull);
+    await value.waitForQueryUpdate();
+    expect(requests, 0);
+    expect(waits, 0);
+    expect(packages.loads, 0);
+    value.enableRemoteUpdates();
+    value.enableRemoteUpdates();
+    expect(value.remoteUpdatesEnabled, isTrue);
+    expect(value.identity, same(identity));
+    final pending = value.resolveForPresentation('settings');
+    gate.complete();
+    expect((await pending)!.document.revision, 1);
+    await value.waitForQueryUpdate();
+    expect(requests, 1);
+  });
+
+  test('原实例开启后缓存版本冻结，新版本仅下一次启动采用', () async {
+    final seed = client(() async => _response(1));
+    await ready(seed);
+    await seed.waitForQueryUpdate();
+    seed.dispose();
+    clients.remove(seed);
+    var requests = 0;
+    final value = client(() async {
+      requests++;
+      return _response(2);
+    }, remoteUpdatesEnabled: false);
+    await ready(value);
+    final selected = await value.resolve('settings');
+    expect(selected!.document.revision, 1);
+    expect(requests, 0);
+    value.enableRemoteUpdates();
+    await value.waitForQueryUpdate();
+    expect(selected.document.revision, 1);
+    expect((await value.resolve('settings'))!.document.revision, 1);
+    expect(requests, 1);
+    value.dispose();
+    clients.remove(value);
+    final next = client(() async => throw StateError('must stay offline'),
+        remoteUpdatesEnabled: false);
+    expect((await next.resolve('settings'))!.document.revision, 2);
+    next.dispose();
+    next.enableRemoteUpdates();
+    expect(next.remoteUpdatesEnabled, isFalse);
+  });
 
   test('临时 HTTP 故障最多三次，恢复后仅报告一次完成', () async {
     var attempts = 0;

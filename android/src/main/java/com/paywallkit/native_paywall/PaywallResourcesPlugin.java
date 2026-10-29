@@ -24,6 +24,16 @@ public final class PaywallResourcesPlugin implements FlutterPlugin, ActivityAwar
         channel = new MethodChannel(binding.getBinaryMessenger(), "native_paywall/resources");
         channel.setMethodCallHandler((call, result) -> {
             if (call.method.startsWith("googlePlay")) { store.handle(call, result); return; }
+            if (call.method.equals("resolveCountry")) {
+                String environment = call.argument("runtimeEnvironment");
+                if (!"test".equals(environment) && !"production".equals(environment)) {
+                    result.error("environment", "Invalid runtime environment", null);
+                    return;
+                }
+                result.success(PaywallStoreCountryCache.resolve(binding.getApplicationContext(),
+                    environment, call.argument("country")));
+                return;
+            }
             if (call.method.equals("countryISO3")) {
                 String code = call.argument("country");
                 try {

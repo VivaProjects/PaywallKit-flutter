@@ -155,3 +155,14 @@ SDK 通过 `track` 回调输出固定事件及文档版本，宿主转发现有�
 升级依赖到 `1.2.0`。SDK 向 H5 的 `custom` 平铺注入 `os`（`iOS` / `Android`）与 `isPad`（布尔值），POST 查询在 `conditions` 中传同名字段；GET 使用字符串查询参数。设备参数变化后需新建会话。
 
 Git 依赖使用 `git@github.com:VivaProjects/PaywallKit-flutter.git`，`ref: 1.2.0`。推荐 `PaywallEnvironmentProvider.capture()` 自动采集；手动构造 `WebPaywallEnvironment` 时传 `os` 和 `isPad`，平板宿主务必传入实际值（手动构造默认 `isPad: false`）。完整 Flutter 接入见 [Flutter Client](FLUTTER_CLIENT.md)。
+
+
+## 商店国家缓存兜底
+
+国家查询成功后保存最近一次有效的 ISO alpha-3 大写国家码；后续查询返回空值时读取缓存，无缓存才传空字符串。缓存按应用及 `runtimeEnvironment` 隔离，跨启动保留，不设置过期时间。新的成功结果覆盖旧值，失败不清空缓存。
+
+仅沿用既有单次商店查询，不新增网络请求、重试、延时窗口或同步落盘等待。缓存不能缩短商店调用本身的耗时；账户切换后若查询失败，可能暂时沿用旧国家。真实商品价格与资格仍由商店提供，不从缓存国家推断。
+
+默认 `PaywallEnvironmentProvider.capture()` 和 `PaywallQueryConfiguration.environment` 返回的环境均接入缓存。Android 的真实国家仍由宿主提供；建议通过 `capture(storefrontCountry: ...)` 注入查询，回调异常会按获取失败兜底。完整 `environment` 回调抛出异常仍作为环境采集失败处理，SDK 不伪造缺失的设备信息。低层直接创建环境对象时可调用 `PaywallEnvironmentProvider.cacheEnvironment()`，或用 `resolveCountry()` 单独解析国家。
+
+Flutter 通过现有原生通道读写本地偏好，不增加运行时依赖；Android 使用 `SharedPreferences.apply()`，iOS 使用 `UserDefaults`，不强制同步磁盘。此次按产品要求持久缓存 Android 商店国家；这与 Google 对 `getBillingConfigAsync()` 数据一次性使用、不存储的官方说明存在差异，不能视为已满足该平台要求。
